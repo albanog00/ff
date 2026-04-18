@@ -37,9 +37,11 @@ void ExplorerContext::walk() {
     return false;
   };
 
+  thread_local std::string pathBuffer;
+  pathBuffer.reserve(KiB(4));
+
   auto buildPath = [=](std::string_view rootPath, struct dirent* entry) {
-    std::string pathBuffer;
-    pathBuffer.reserve(KiB(4));
+    pathBuffer.clear();
     pathBuffer.assign(rootPath);
     if (rootPath.back() != '/') { pathBuffer += "/"; }
     pathBuffer.append(entry->d_name);
