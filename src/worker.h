@@ -1,8 +1,6 @@
 #pragma once
 
 #include "constants.h"
-#include "queue/blockingconcurrentqueue.h"
-#include "queue/concurrentqueue.h"
 
 #include <vector>
 #include <thread>
@@ -23,6 +21,10 @@ public:
     return queue.enqueue_bulk(std::make_move_iterator(span.begin()), span.size());
   }
 
+  inline u32 dequeueBulk(const std::span<Task>& out) {
+    return queue.wait_dequeue_bulk(out.begin(), out.size());
+  }
+
   inline void dequeue(Task& out) { return queue.wait_dequeue(out); }
 
   inline void poison() {
@@ -41,13 +43,13 @@ public:
     for (auto& t : threads) { t.join(); }
   }
 
-  static inline const Task POISON{"WORKER_POISON"};
+  static inline const Task POISON;
 
 private:
-  moodycamel::BlockingConcurrentQueue<Task> queue{8 << 10};
-  std::vector<std::thread>                  threads{};
-  std::atomic<u32>                          pendingWork{0};
-  std::atomic<bool>                         stopping{false};
+  BlockingQueue            queue{8 << 10};
+  std::vector<std::thread> threads{};
+  std::atomic<u32>         pendingWork{0};
+  std::atomic<bool>        stopping{false};
 
-  void                                      work();
+  void                     work();
 };

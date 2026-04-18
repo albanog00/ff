@@ -1,6 +1,4 @@
 #include "app.h"
-#include "constants.h"
-#include "worker.h"
 #include "explorer.h"
 
 #include <cstring>
@@ -121,13 +119,13 @@ bool init(std::span<char*> args) {
 }
 
 void run() {
-  WorkerContext   workerCtx{};
-  ExplorerContext explorerCtx{workerCtx, g_app->path};
+  // WorkerContext   workerCtx{};
+  ExplorerContext explorerCtx{g_app->path};
   explorerCtx.join();
 
   // explorer threads are available, spawn more workers to speed up completion
-  workerCtx.spawn(nExplorers);
-  workerCtx.join();
+  // workerCtx.spawn(nExplorers);
+  // workerCtx.join();
 }
 
 i32 main(i32 argc, char** argv) {

@@ -1,17 +1,13 @@
 #pragma once
 
-#include "worker.h"
 #include "constants.h"
-
-#include "queue/blockingconcurrentqueue.h"
-#include "queue/concurrentqueue.h"
 
 #include <vector>
 #include <thread>
 
 struct ExplorerContext {
 public:
-  ExplorerContext(WorkerContext& workerCtx, const std::string& startPath);
+  ExplorerContext(std::string startPath);
 
   inline bool enqueue(Task val) { return queue.enqueue(std::move(val)); }
 
@@ -19,6 +15,10 @@ public:
 
   inline bool enqueueBulk(const std::span<Task>& span) {
     return queue.enqueue_bulk(std::make_move_iterator(span.begin()), span.size());
+  }
+
+  inline u32 dequeueBulk(const std::span<Task>& span) {
+    return queue.wait_dequeue_bulk(span.begin(), span.size());
   }
 
   inline void dequeue(Task& out) { return queue.wait_dequeue(out); }
@@ -31,13 +31,12 @@ public:
     for (auto& t : threads) { t.join(); }
   }
 
-  static inline const Task POISON{"EXPLORER_POISON"};
+  static inline const Task POISON;
 
 private:
-  WorkerContext&                            workerCtx;
-  moodycamel::BlockingConcurrentQueue<Task> queue{8 << 10};
-  std::vector<std::thread>                  threads{};
-  std::atomic<u32>                          dirsInFlight{1};
+  BlockingQueue            queue{8 << 10};
+  std::vector<std::thread> threads{};
+  std::atomic<u32>         dirsInFlight{1};
 
-  void                                      walk();
+  void                     walk();
 };

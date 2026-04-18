@@ -2,3 +2,7 @@ build
 .cache
 samples
 result
+
+perf.data*
+flamegraph.html
+

@@ -18,6 +18,8 @@ file(GLOB_RECURSE SRCFILES CONFIGURE_DEPENDS "src/*.cpp" "src/*.hpp")
 
 add_executable(${PROJECT_NAME} ${SRCFILES})
 
+target_link_libraries(${PROJECT_NAME} atomic)
+
 find_package(spdlog REQUIRED)
 if (spdlog_FOUND)
     message(STATUS "spdlog found: ${spdlog_VERSION}")

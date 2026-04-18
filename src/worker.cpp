@@ -45,21 +45,24 @@ void WorkerContext::work() {
     buffer += "\n";
   };
 
-  Task filePathRef;
+  std::array<Task, 16> filePathRefs{};
+  bool                 loop = true;
 
-  while (true) {
-    dequeue(filePathRef);
-    [[unlikely]] if (filePathRef == POISON) { break; }
+  while (loop) {
+    u32 count = dequeueBulk(filePathRefs);
+    for (u32 i = 0; i < count; ++i) {
+      [[unlikely]] if (filePathRefs[i] == POISON) {
+        enqueue(std::move(filePathRefs[i]));
+        loop = false;
+        break;
+      }
 
-    u64              pos = 0;
-    std::string_view view{*filePathRef};
-
-    if ((pos = view.find(pattern)) != std::string::npos) {
-      formatPath(pos, view);
-      [[unlikely]] if (buffer.size() >= KiB(30)) { flushBuffer(); }
+      u64              pos = 0;
+      std::string_view view{filePathRefs[i]};
+      if ((pos = view.find(pattern)) != std::string::npos) { formatPath(pos, view); }
+      if (pendingWork.fetch_sub(1, std::memory_order_acq_rel) == 1 && stopping) { poison(); }
     }
-
-    if (pendingWork.fetch_sub(1, std::memory_order_acq_rel) == 1 && stopping) { poison(); }
+    if (buffer.size() >= KiB(30)) { flushBuffer(); }
   }
 
   flushBuffer();
