@@ -1,6 +1,5 @@
 #pragma once
 
-#include "memory/pool.h"
 #include "types.h"
 
 #include <cassert>
@@ -25,29 +24,17 @@ namespace memory {
     void   release() {
       if (block_ && block_->refCount_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
         delete block_;
-        // pool().release(block_);
       }
       block_ = nullptr;
-    }
-
-    static Pool<Block>& pool() {
-      static Pool<Block> p;
-      return p;
     }
 
   public:
     Arc() noexcept = default;
 
-    Arc(T&& val) {
-      // Block* memory = pool().acquire();
-      // block_        = new (memory) Block(std::move(val));
-      block_ = new Block(std::move(val));
-    }
+    Arc(T&& val) { block_ = new Block(std::move(val)); }
 
     template <typename... Args>
     Arc(Args&&... args) {
-      // Block* memory = pool().acquire();
-      // block_        = new (memory) Block(std::forward<Args>(args)...);
       block_ = new Block(std::forward<Args>(args)...);
     }
 

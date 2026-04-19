@@ -2,8 +2,6 @@
 
 #include "memory/types.h"
 
-using namespace memory;
-
 struct App {
   u32         maxDepth{0};
   bool        pipe{false};

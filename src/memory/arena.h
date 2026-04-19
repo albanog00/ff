@@ -14,6 +14,11 @@ namespace memory {
     return pageSize;
   }
 
+  inline u64 getCommitSize() {
+    static u64 commitSize = getPageSize() << 10; // ~4MiB for 4KiB pages
+    return commitSize;
+  }
+
   inline u64 alignUp(u64 value, u64 alignment = alignof(std::max_align_t)) {
     assert((alignment & (alignment - 1)) == 0 && "alignment now power of 2");
     return (value + alignment - 1) & ~(alignment - 1);
@@ -30,25 +35,30 @@ namespace memory {
 
     u8* block_{nullptr};
     // ChunkList* freeList{nullptr};
-    u64  reservedSize{0};
-    u64  committedSize{0};
-    u64  currentOffset{0};
+    u64              reservedSize{0};
+    std::atomic<u64> committedSize{0};
+    std::atomic<u64> currentOffset{0};
+    std::mutex       commitMutex;
 
-    bool commit(u64 newOffset) {
-      assert(newOffset >= currentOffset);
+    bool             commit(u64 newOffset) {
+      std::scoped_lock lk(commitMutex);
 
-      const u64 pageSize     = getPageSize();
-      u64       commitTarget = alignUp(newOffset, pageSize);
-      if (commitTarget > reservedSize) { commitTarget = reservedSize; }
+      u64              committed = committedSize.load(std::memory_order_acquire);
+      if (committed >= newOffset) { return true; }
 
-      u64   sizeToCommit    = commitTarget - committedSize;
-      void* commitStartAddr = block_ + committedSize;
+      u64 commitTarget = alignUp(newOffset, getCommitSize());
+      commitTarget     = std::min(commitTarget, reservedSize);
+
+      void* commitStartAddr = block_ + committed;
+      u64   sizeToCommit    = commitTarget - committed;
+
       if (mprotect(commitStartAddr, sizeToCommit, PROT_READ | PROT_WRITE) != 0) {
         spdlog::error("mprotect allocation failed");
+        assert(false);
         return false;
       }
 
-      committedSize = commitTarget;
+      committedSize.store(commitTarget, std::memory_order_release);
       return true;
     }
 
@@ -85,24 +95,31 @@ namespace memory {
 
     void* alloc(u64 size, u64 alignment = alignof(std::max_align_t)) {
       assert((alignment & (alignment - 1)) == 0 && "alignment now power of 2");
-
       if (size == 0) { return nullptr; }
 
-      u64 alignedOffset = alignUp(currentOffset, alignment);
-      u64 newOffset     = alignedOffset + size;
+      u64 current = currentOffset.load(std::memory_order_relaxed);
+      while (true) {
+        u64 alignedOffset = alignUp(current, alignment);
+        u64 newOffset     = alignedOffset + size;
 
-      if (newOffset > reservedSize) { return nullptr; } //  out of memory
-      if (newOffset > committedSize && !commit(newOffset)) { return nullptr; }
+        if (newOffset > reservedSize) { return nullptr; }
+        if (newOffset > committedSize.load(std::memory_order_acquire)) {
+          if (!commit(newOffset)) { return nullptr; }
+        }
 
-      currentOffset = newOffset;
+        if (currentOffset.compare_exchange_weak(
+                current, newOffset, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+          return static_cast<void*>(block_ + alignedOffset);
+        }
+      }
 
-      return static_cast<void*>(block_ + alignedOffset);
+      return nullptr;
     }
 
     // void        release(T*, u64) {}
 
     inline bool owns(const void* ptr) const {
-      return ptr < block_ + currentOffset && ptr >= block_;
+      return ptr < block_ + currentOffset.load(std::memory_order_relaxed) && ptr >= block_;
     }
   };
 }

@@ -1,12 +1,14 @@
 #include "explorer.h"
 #include "app.h"
+#include "memory/types.h"
 
+#include <string_view>
 #include <sys/dir.h>
 #include <sys/stat.h>
 #include <spdlog/spdlog.h>
 
 ExplorerContext::ExplorerContext(std::string startPath) {
-  if (!tryEnqueue(std::move(startPath))) {
+  if (!tryEnqueue(string::String::from(startPath))) {
     spdlog::error("unable to enqueue path `{}`", startPath);
     throw std::logic_error("could not start search");
   }
@@ -18,41 +20,35 @@ ExplorerContext::ExplorerContext(std::string startPath) {
 }
 
 void ExplorerContext::walk() {
-
   const std::string& pattern       = g_app->pattern;
   const u64          size          = pattern.size();
   const bool         is_pipe       = g_app->pipe;
   const bool         enqueueHidden = g_app->hidden;
 
-  std::string        buffer;
-  buffer.reserve(KiB(32));
-
-  auto isDirectory = [](struct dirent* entry, const char* fullPath) {
+  auto               isDirectory = [](string::String& fullPath, struct dirent* entry) {
     if (entry->d_type == DT_DIR) {
       return true;
     } else if (entry->d_type == DT_UNKNOWN) {
       struct stat st;
-      return (stat(fullPath, &st) == 0) && S_ISDIR(st.st_mode);
+      return (stat(fullPath.c_str(), &st) == 0) && S_ISDIR(st.st_mode);
     }
     return false;
   };
 
-  thread_local std::string pathBuffer;
-  pathBuffer.reserve(KiB(4));
-
-  auto buildPath = [=](std::string_view rootPath, struct dirent* entry) {
-    pathBuffer.clear();
-    pathBuffer.assign(rootPath);
+  auto buildPath = [&](string::String& rootPath, struct dirent* entry) {
+    static thread_local string::String pathBuffer{KiB(4)};
+    pathBuffer = rootPath;
     if (rootPath.back() != '/') { pathBuffer += "/"; }
     pathBuffer.append(entry->d_name);
-    if (isDirectory(entry, pathBuffer.data())) { pathBuffer += "/"; }
+    if (isDirectory(pathBuffer, entry)) { pathBuffer += "/"; }
     return pathBuffer;
   };
 
-  auto flushBuffer = [&] {
+  thread_local string::String buffer{KiB(32)};
+  auto                        flushBuffer = [&] {
     u64 written = 0;
     while (written < buffer.size()) {
-      ssize_t n = write(STDOUT_FILENO, buffer.data() + written, buffer.size() - written);
+      ssize_t n = write(STDOUT_FILENO, buffer.c_str() + written, buffer.size() - written);
       if (n <= 0) { break; }
       written += static_cast<u64>(n);
     }
@@ -60,9 +56,10 @@ void ExplorerContext::walk() {
   };
 
   // view will move
-  auto highlightPattern = [&](std::string_view& view) {
+  auto findAndHighlightPattern = [&](std::string_view view) {
     bool found = false;
     u64  it    = 0;
+
     while ((it = view.find(pattern)) != std::string::npos) {
       found = true;
       if (is_pipe) { break; }               // no highlight in pipe mode
@@ -72,46 +69,43 @@ void ExplorerContext::walk() {
       buffer += "\033[0m";                  // reset color
       view.remove_prefix(it + size);
     }
-    return found;
-  };
 
-  auto validateAndPushInBuffer = [&](std::string_view view) {
-    if (highlightPattern(view)) {
+    if (found) {
       buffer.append(view); // append rest of string
       buffer += "\n";
     }
   };
 
-  std::vector<Task> dirsBatch{256};
-  dirsBatch.clear();
+  std::vector<string::String> dirsBatch;
+  dirsBatch.reserve(256);
 
-  std::array<Task, 16> filePathRefs;
+  std::array<string::String, 16> filePathRefs;
   bool                 loop = true;
 
   while (loop) {
     u32 count = dequeueBulk(filePathRefs);
     for (u32 i = 0; i < count; ++i) {
-      [[unlikely]] if (filePathRefs[i] == POISON) {
-        enqueue(std::move(filePathRefs[i]));
+      string::String filePathRoot = std::move(filePathRefs[i]);
+      [[unlikely]] if (filePathRoot == POISON) {
+        enqueue(std::move(filePathRoot));
         loop = false;
         break;
       }
 
-      std::string& filePathRoot = filePathRefs[i];
-      [[likely]] if (!(filePathRoot == "/proc" || filePathRoot.starts_with("/proc/"))) {
+      [[likely]] if (!(filePathRoot.startsWith("/proc/"))) {
         DIR*           dirHandle;
         struct dirent* entry;
 
-        [[likely]] if ((dirHandle = opendir(filePathRoot.data())) != NULL) {
+        [[likely]] if ((dirHandle = opendir(filePathRoot.c_str())) != NULL) {
           while ((entry = readdir(dirHandle)) != NULL) {
             if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) { continue; }
             if (!enqueueHidden && strncmp(entry->d_name, ".", 1) == 0) { continue; }
 
-            std::string path = buildPath(filePathRoot, entry);
-            validateAndPushInBuffer(path);
-            if (path.back() == '/') {
+            string::String fullPath = buildPath(filePathRoot, entry);
+            findAndHighlightPattern(fullPath.view());
+            if (fullPath.back() == '/') {
               dirsInFlight.fetch_add(1, std::memory_order_acq_rel);
-              dirsBatch.emplace_back(path);
+              dirsBatch.emplace_back(std::move(fullPath));
             }
           }
           closedir(dirHandle);
@@ -119,13 +113,15 @@ void ExplorerContext::walk() {
       }
     }
 
-    enqueueBulk({dirsBatch.begin(), dirsBatch.size()});
-    dirsBatch.clear();
     [[unlikely]] if (!loop) { break; }
+    enqueueBulk(dirsBatch);
+    dirsBatch.clear();
+
+    if (buffer.size() >= KiB(24)) { flushBuffer(); }
     [[unlikely]] if (dirsInFlight.fetch_sub(count, std::memory_order_acq_rel) == count) {
       poison();
     }
-    if (buffer.size() >= KiB(30)) { flushBuffer(); }
   }
+
   flushBuffer();
 };
