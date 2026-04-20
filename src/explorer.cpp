@@ -77,10 +77,10 @@ void ExplorerContext::walk() {
   };
 
   std::vector<string::String> dirsBatch;
-  dirsBatch.reserve(256);
+  dirsBatch.reserve(1024);
 
   std::array<string::String, 16> filePathRefs;
-  bool                 loop = true;
+  bool                           loop = true;
 
   while (loop) {
     u32 count = dequeueBulk(filePathRefs);

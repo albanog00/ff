@@ -11,6 +11,7 @@ namespace string {
   template <typename T>
     requires std::is_arithmetic_v<T>
   struct StringPool {
+  private:
     static constexpr u32 Alignment = 64;
     static constexpr u32 MinBlock  = 64;
     static constexpr u32 MaxBlock  = 4096;
@@ -20,20 +21,6 @@ namespace string {
       Node* next;
     };
 
-    StringPool(u32 initialCapacityPerBucket = 16) {
-      u32 blockSize = MinBlock;
-      for (u32 i = 0; i < Buckets; ++i, blockSize <<= 1) {
-        Node* head = nullptr;
-        for (u32 j = 0; j < initialCapacityPerBucket; ++j) {
-          Node* node = reinterpret_cast<Node*>(arena.alloc(blockSize, Alignment));
-          node->next = head;
-          head       = node;
-        }
-        freeLists[i] = head;
-      }
-    }
-
-    memory::Arena                    arena{GiB(1)};
     static inline thread_local Node* freeLists[Buckets]{};
 
     inline u32                       getBucketIdx(u32 capacity) {
@@ -44,6 +31,20 @@ namespace string {
         idx += 1;
       }
       return idx;
+    }
+
+  public:
+    StringPool(u32 initialCapacityPerBucket = 16) {
+      u32 blockSize = MinBlock;
+      for (u32 i = 0; i < Buckets; ++i, blockSize <<= 1) {
+        Node* head = nullptr;
+        for (u32 j = 0; j < initialCapacityPerBucket; ++j) {
+          Node* node = reinterpret_cast<Node*>(memory::getArena().alloc(blockSize, Alignment));
+          node->next = head;
+          head       = node;
+        }
+        freeLists[i] = head;
+      }
     }
 
     T* acquire(u32 size, u32& outCapacity) {
@@ -61,11 +62,11 @@ namespace string {
       }
       // no free node or allocation > MaxBlock
       // fallback and alloc on arena
-      return reinterpret_cast<T*>(arena.alloc(outCapacity, Alignment));
+      return reinterpret_cast<T*>(memory::getArena().alloc(outCapacity, Alignment));
     }
 
     void release(T* ptr, u32 capacity) {
-      if (!ptr || !arena.owns(ptr)) { return; }
+      if (!ptr || !memory::getArena().owns(ptr)) { return; }
       if (capacity < MinBlock || capacity > MaxBlock) { return; }
       if (!std::has_single_bit(capacity)) { return; }
       u32   idx      = getBucketIdx(capacity);

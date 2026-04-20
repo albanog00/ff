@@ -20,7 +20,7 @@ namespace memory {
   }
 
   inline u64 alignUp(u64 value, u64 alignment = alignof(std::max_align_t)) {
-    assert((alignment & (alignment - 1)) == 0 && "alignment now power of 2");
+    assert((alignment & (alignment - 1)) == 0 && "alignment not power of 2");
     return (value + alignment - 1) & ~(alignment - 1);
   }
 
@@ -63,7 +63,13 @@ namespace memory {
     }
 
   public:
-    Arena() = default;
+    Arena() = delete;
+
+    // non-copyable/movable
+    Arena(const Arena&)            = delete;
+    Arena(Arena&&)                 = delete;
+    Arena& operator=(const Arena&) = delete;
+    Arena& operator=(Arena&&)      = delete;
 
     // allocate `reserveSize` of virtual memory addressed
     Arena(u64 reserveSize = MiB(64)) {
@@ -71,15 +77,19 @@ namespace memory {
       reserveSize        = alignUp(reserveSize, pageSize);
 
       // reserve memory addresses
-      u8* block = (u8*)mmap(NULL, reserveSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+      u8* block = (u8*)mmap(
+          NULL, reserveSize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
 
       if (block == MAP_FAILED) {
+        // mmap failed
         spdlog::error("mmap failed");
         throw std::system_error(errno, std::generic_category(), "mmap failed");
       }
 
-      // allocate pageSize (likely 4KiB)
-      if (mprotect(block, pageSize, PROT_READ | PROT_WRITE) != 0) {
+      // reserveSize might be less than what getCommitSize returns
+      const u64 commitSize = std::min(reserveSize, getCommitSize());
+      if (mprotect(block, commitSize, PROT_READ | PROT_WRITE) != 0) {
+        // mprotect failed
         munmap(block, reserveSize);
         spdlog::error("mprotect allocation failed");
         throw std::system_error(errno, std::generic_category(), "mprotect failed");
@@ -102,9 +112,9 @@ namespace memory {
         u64 alignedOffset = alignUp(current, alignment);
         u64 newOffset     = alignedOffset + size;
 
-        if (newOffset > reservedSize) { return nullptr; }
+        if (newOffset > reservedSize) { break; }
         if (newOffset > committedSize.load(std::memory_order_acquire)) {
-          if (!commit(newOffset)) { return nullptr; }
+          if (!commit(newOffset)) { break; }
         }
 
         if (currentOffset.compare_exchange_weak(
@@ -122,4 +132,9 @@ namespace memory {
       return ptr < block_ + currentOffset.load(std::memory_order_relaxed) && ptr >= block_;
     }
   };
+
+  inline Arena& getArena() {
+    static UP<Arena> arena = std::make_unique<Arena>(GiB(1));
+    return *arena;
+  }
 }
