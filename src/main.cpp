@@ -23,6 +23,8 @@ constexpr void printUsage(char* cmd) {
   std::println("--help,      -h   Show help.");
   std::println("--max-depth, -d   Set the maximum depth for directory traversal.");
   std::println("--hidden,    -H   Include hidden files in search.");
+  std::println("--type,      -t   Filter filetype: directory,dir,d,file,f\n"
+               "                    comma separated: --type=dir,file");
   exit(1);
 }
 
