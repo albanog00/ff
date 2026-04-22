@@ -10,7 +10,7 @@ inline string::String POISON = string::String::from("Poison");
 struct ExplorerContext {
 
 public:
-  ExplorerContext(string::String startPath);
+  ExplorerContext(std::span<string::String> startPath);
 
   inline bool enqueue(Task&& val) { return queue.enqueue(std::move(val)); }
 
@@ -35,7 +35,7 @@ public:
 private:
   BlockingQueue            queue{8 << 10};
   std::vector<std::thread> threads{};
-  std::atomic<u32>         dirsInFlight{1};
+  std::atomic<u32>         dirsInFlight{0};
 
   void                     walk();
 };

@@ -8,11 +8,18 @@
 #include <spdlog/spdlog.h>
 #include <experimental/scope>
 
-ExplorerContext::ExplorerContext(string::String startPath) {
-  if (!tryEnqueue(Task(startPath, 0))) {
-    spdlog::error("unable to enqueue path `{}`", startPath.c_str());
-    throw std::logic_error("could not start search");
+ExplorerContext::ExplorerContext(std::span<string::String> startPaths) {
+  u32 failed = 0;
+  for (u32 i = 0; i < startPaths.size(); ++i) {
+    if (!tryEnqueue(Task(startPaths[i], 0))) {
+      failed += 1;
+      spdlog::error("unable to enqueue path `{}`", startPaths[i].c_str());
+    } else {
+      dirsInFlight.fetch_add(1, std::memory_order_relaxed);
+    }
   }
+
+  if (failed == startPaths.size()) { throw std::logic_error("could not start search"); }
 
   threads.reserve(nExplorers);
   for (u32 i = 0; i < nExplorers; ++i) {
@@ -109,9 +116,8 @@ void ExplorerContext::walk() {
             string::String fullPath = buildPath(dirPath, entry);
             findAndHighlightPattern(fullPath.view());
 
-            if (maxDepth > 0 && task.directoryLevel == maxDepth) { continue; }
-
             if (fullPath.back() == '/') {
+              if (maxDepth > 0 && task.directoryLevel + 1 == maxDepth) { continue; }
               dirsInFlight.fetch_add(1, std::memory_order_acq_rel);
               dirsBatch.emplace_back(std::move(fullPath), task.directoryLevel + 1);
             }
