@@ -64,9 +64,9 @@ Result parseNumber(std::string_view str, T& out, NumberSign sign) {
 
 void parseOption(std::string_view opt) {
   if (opt.starts_with("--max-depth=") || opt.starts_with("-d=")) {
-    i32    pos = opt.find_first_of('=');
+    u64    pos = opt.find_first_of('=') + 1;
 
-    Result res = parseNumber(opt.begin() + pos + 1, g_app->maxDepth, NumberSign::Positive);
+    Result res = parseNumber(opt.begin() + pos, g_app->maxDepth, NumberSign::Positive);
     if (!res.success) {
       spdlog::error(res.error.message);
       throw std::logic_error("invalid value for `max-depth` option");
@@ -75,6 +75,20 @@ void parseOption(std::string_view opt) {
     spdlog::debug("parsed `maxDepth` with value: `{}`", g_app->maxDepth);
   } else if (opt.starts_with("--hidden") || opt.starts_with("-H")) {
     g_app->hidden = true;
+  } else if (opt.starts_with("--type=") || opt.starts_with("-t=")) {
+    // types are splitted by comma `,`
+    u64 pos  = opt.find_first_of("=") + 1;
+    u64 last = pos;
+    while (true) {
+      if (pos = opt.find(',', pos); pos == std::string_view::npos) { break; }
+      g_app->type |= FileType::parse(opt.substr(last, pos - last));
+      pos += 1;
+      last = pos;
+    }
+    g_app->type |= FileType::parse(opt.substr(last));
+  } else {
+    spdlog::error("unknown option `{}`", opt);
+    exit(1);
   }
 }
 

@@ -33,6 +33,7 @@ void ExplorerContext::walk() {
   static const bool        is_pipe       = g_app->pipe;
   static const bool        enqueueHidden = g_app->hidden;
   static const u32         maxDepth      = g_app->maxDepth;
+  static const FileType    fileType      = g_app->type;
 
   auto                     isDirectory = [](string::String& fullPath, struct dirent* entry) {
     if (entry->d_type == DT_DIR) {
@@ -49,8 +50,9 @@ void ExplorerContext::walk() {
     pathBuffer = rootPath;
     if (rootPath.back() != '/') { pathBuffer += "/"; }
     pathBuffer.append(entry->d_name);
-    if (isDirectory(pathBuffer, entry)) { pathBuffer += "/"; }
-    return pathBuffer;
+    bool isDir = isDirectory(pathBuffer, entry);
+    if (isDir) { pathBuffer += "/"; }
+    return std::pair(pathBuffer, isDir);
   };
 
   thread_local string::String buffer{KiB(16)};
@@ -113,8 +115,11 @@ void ExplorerContext::walk() {
             if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) { continue; }
             if (!enqueueHidden && entry->d_name[0] == '.') { continue; }
 
-            string::String fullPath = buildPath(dirPath, entry);
-            findAndHighlightPattern(fullPath.view());
+            auto [fullPath, isDir] = buildPath(dirPath, entry);
+            if ((fileType == FileType::None) || ((fileType & FileType::Directory) > 0 && isDir) ||
+                ((fileType & FileType::File) > 0 && !isDir)) {
+              findAndHighlightPattern(fullPath.view());
+            }
 
             if (fullPath.back() == '/') {
               if (maxDepth > 0 && task.directoryLevel + 1 == maxDepth) { continue; }
