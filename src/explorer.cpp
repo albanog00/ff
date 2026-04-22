@@ -29,7 +29,6 @@ ExplorerContext::ExplorerContext(std::span<string::String> startPaths) {
 
 void ExplorerContext::walk() {
   static const std::string pattern       = g_app->pattern.string();
-  static const u64         size          = pattern.size();
   static const bool        is_pipe       = g_app->pipe;
   static const bool        enqueueHidden = g_app->hidden;
   static const u32         maxDepth      = g_app->maxDepth;
@@ -72,12 +71,12 @@ void ExplorerContext::walk() {
 
     while ((it = view.find(pattern)) != std::string::npos) {
       found = true;
-      if (is_pipe) { break; }               // no highlight in pipe mode
-      buffer.append(view.substr(0, it));    // append till start of pattern
-      buffer += "\033[31m";                 // color
-      buffer.append(view.substr(it, size)); // append pattern
-      buffer += "\033[0m";                  // reset color
-      view.remove_prefix(it + size);
+      if (is_pipe) { break; }                         // no highlight in pipe mode
+      buffer.append(view.substr(0, it));              // append till start of pattern
+      buffer += "\033[31m";                           // color
+      buffer.append(view.substr(it, pattern.size())); // append pattern
+      buffer += "\033[0m";                            // reset color
+      view.remove_prefix(it + pattern.size());
     }
 
     if (found) {
@@ -110,6 +109,7 @@ void ExplorerContext::walk() {
       [[likely]] if (!(dirPath.startsWith("/proc/"))) {
         DIR*           dirHandle;
         struct dirent* entry;
+
         [[likely]] if ((dirHandle = opendir(dirPath.c_str())) != NULL) {
           while ((entry = readdir(dirHandle)) != NULL) {
             if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) { continue; }
@@ -127,6 +127,7 @@ void ExplorerContext::walk() {
               dirsBatch.emplace_back(std::move(fullPath), task.directoryLevel + 1);
             }
           }
+
           closedir(dirHandle);
         }
       }

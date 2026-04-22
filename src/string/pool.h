@@ -36,13 +36,21 @@ namespace string {
   public:
     StringPool(u32 initialCapacityPerBucket = 16) {
       u32 blockSize = MinBlock;
+      u32 totalMemory =
+          MaxBlock * initialCapacityPerBucket * 2 - (MinBlock * initialCapacityPerBucket);
+      u8* memory        = reinterpret_cast<u8*>(memory::getArena().alloc(totalMemory, Alignment));
+      u32 currentOffset = 0;
+
       for (u32 i = 0; i < Buckets; ++i, blockSize <<= 1) {
         Node* head = nullptr;
+
         for (u32 j = 0; j < initialCapacityPerBucket; ++j) {
-          Node* node = reinterpret_cast<Node*>(memory::getArena().alloc(blockSize, Alignment));
+          Node* node = reinterpret_cast<Node*>(memory + currentOffset);
           node->next = head;
           head       = node;
+          currentOffset += blockSize;
         }
+
         freeLists[i] = head;
       }
     }
