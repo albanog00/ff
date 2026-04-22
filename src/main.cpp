@@ -78,9 +78,9 @@ void parseOption(std::string_view opt) {
   }
 }
 
-void parsePath(char* p) {
+void parsePath(const char* p) {
   if (std::filesystem::exists(p) && std::filesystem::is_directory(p)) {
-    g_app->path = std::move(std::filesystem::canonical(p).native());
+    g_app->path = string::String::from(std::filesystem::canonical(p).native());
   } else {
     spdlog::warn("discarding invalid path `{}`", p);
   }
@@ -99,7 +99,7 @@ bool init(std::span<char*> args) {
       }
       parseOption(args[i]);
     } else if (g_app->pattern.empty()) {
-      g_app->pattern = args[i];
+      g_app->pattern = string::String::from(args[i]);
     } else if (g_app->path.empty()) {
       parsePath(args[i]);
     }

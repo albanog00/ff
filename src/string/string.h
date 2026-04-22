@@ -63,9 +63,9 @@ namespace string {
     ~String() { release(); }
 
     // copyable
-    String(const String& o) : String(o.size_) { copy(o); }
+    String(const String& o) noexcept { copy(o); }
 
-    String& operator=(const String& o) {
+    String& operator=(const String& o) noexcept {
       if (this == &o) { return *this; }
       copy(o);
       return *this;
@@ -148,18 +148,20 @@ namespace string {
       data_[size_] = 0;
     }
 
-    void      append(const char* o, u32 size) { append(reinterpret_cast<const u8*>(o), size); }
-    void      append(const String& o) { append(o.data_, o.size_); }
-    void      append(const char* o) { append(o, strlen(o)); }
-    void      append(const std::string& o) { append(o.data(), o.size()); }
-    void      append(const std::string_view& o) { append(o.data(), o.size()); }
+    void        append(const char* o, u32 size) { append(reinterpret_cast<const u8*>(o), size); }
+    void        append(const String& o) { append(o.data_, o.size_); }
+    void        append(const char* o) { append(o, strlen(o)); }
+    void        append(const std::string& o) { append(o.data(), o.size()); }
+    void        append(const std::string_view& o) { append(o.data(), o.size()); }
 
-    void      operator+=(const String& o) { append(o); }
-    void      operator+=(const char* o) { append(o); }
-    void      operator+=(const std::string& o) { append(o); }
-    void      operator+=(const std::string_view& o) { append(o); }
+    void        operator+=(const String& o) { append(o); }
+    void        operator+=(const char* o) { append(o); }
+    void        operator+=(const std::string& o) { append(o); }
+    void        operator+=(const std::string_view& o) { append(o); }
 
-    inline u8 back() const {
+    inline bool empty() const { return size_ == 0; }
+
+    inline u8   back() const {
       if (data_ && size_ > 0) { return data_[size_ - 1]; }
       return 0;
     }

@@ -6,10 +6,11 @@
 #include <sys/dir.h>
 #include <sys/stat.h>
 #include <spdlog/spdlog.h>
+#include <experimental/scope>
 
-ExplorerContext::ExplorerContext(std::string startPath) {
-  if (!tryEnqueue(string::String::from(startPath))) {
-    spdlog::error("unable to enqueue path `{}`", startPath);
+ExplorerContext::ExplorerContext(string::String startPath) {
+  if (!tryEnqueue(Task(startPath, 0))) {
+    spdlog::error("unable to enqueue path `{}`", startPath.c_str());
     throw std::logic_error("could not start search");
   }
 
@@ -20,12 +21,13 @@ ExplorerContext::ExplorerContext(std::string startPath) {
 }
 
 void ExplorerContext::walk() {
-  const std::string& pattern       = g_app->pattern;
-  const u64          size          = pattern.size();
-  const bool         is_pipe       = g_app->pipe;
-  const bool         enqueueHidden = g_app->hidden;
+  static const std::string pattern       = g_app->pattern.string();
+  static const u64         size          = pattern.size();
+  static const bool        is_pipe       = g_app->pipe;
+  static const bool        enqueueHidden = g_app->hidden;
+  static const u32         maxDepth      = g_app->maxDepth;
 
-  auto               isDirectory = [](string::String& fullPath, struct dirent* entry) {
+  auto                     isDirectory = [](string::String& fullPath, struct dirent* entry) {
     if (entry->d_type == DT_DIR) {
       return true;
     } else if (entry->d_type == DT_UNKNOWN) {
@@ -44,7 +46,7 @@ void ExplorerContext::walk() {
     return pathBuffer;
   };
 
-  thread_local string::String buffer{KiB(32)};
+  thread_local string::String buffer{KiB(16)};
   auto                        flushBuffer = [&] {
     u64 written = 0;
     while (written < buffer.size()) {
@@ -55,7 +57,6 @@ void ExplorerContext::walk() {
     buffer.clear();
   };
 
-  // view will move
   auto findAndHighlightPattern = [&](std::string_view view) {
     bool found = false;
     u64  it    = 0;
@@ -76,36 +77,43 @@ void ExplorerContext::walk() {
     }
   };
 
-  std::vector<string::String> dirsBatch;
+  auto              ret = std::experimental::scope_exit(flushBuffer);
+
+  std::vector<Task> dirsBatch;
   dirsBatch.reserve(1024);
 
-  std::array<string::String, 16> filePathRefs;
-  bool                           loop = true;
+  std::array<Task, 16> tasks;
 
-  while (loop) {
-    u32 count = dequeueBulk(filePathRefs);
+  // Add max-depth
+  // Simple way: struct with directory level
+
+  while (true) {
+    u32 count = dequeueBulk(tasks);
+
     for (u32 i = 0; i < count; ++i) {
-      string::String filePathRoot = std::move(filePathRefs[i]);
-      [[unlikely]] if (filePathRoot == POISON) {
-        enqueue(std::move(filePathRoot));
-        loop = false;
-        break;
+      Task& task = tasks[i];
+      [[unlikely]] if (task.fullPath == POISON) {
+        enqueue(std::move(task));
+        return;
       }
 
-      [[likely]] if (!(filePathRoot.startsWith("/proc/"))) {
+      string::String& dirPath = task.fullPath;
+      [[likely]] if (!(dirPath.startsWith("/proc/"))) {
         DIR*           dirHandle;
         struct dirent* entry;
-
-        [[likely]] if ((dirHandle = opendir(filePathRoot.c_str())) != NULL) {
+        [[likely]] if ((dirHandle = opendir(dirPath.c_str())) != NULL) {
           while ((entry = readdir(dirHandle)) != NULL) {
             if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) { continue; }
-            if (!enqueueHidden && strncmp(entry->d_name, ".", 1) == 0) { continue; }
+            if (!enqueueHidden && entry->d_name[0] == '.') { continue; }
 
-            string::String fullPath = buildPath(filePathRoot, entry);
+            string::String fullPath = buildPath(dirPath, entry);
             findAndHighlightPattern(fullPath.view());
+
+            if (maxDepth > 0 && task.directoryLevel == maxDepth) { continue; }
+
             if (fullPath.back() == '/') {
               dirsInFlight.fetch_add(1, std::memory_order_acq_rel);
-              dirsBatch.emplace_back(std::move(fullPath));
+              dirsBatch.emplace_back(std::move(fullPath), task.directoryLevel + 1);
             }
           }
           closedir(dirHandle);
@@ -113,15 +121,12 @@ void ExplorerContext::walk() {
       }
     }
 
-    [[unlikely]] if (!loop) { break; }
     enqueueBulk(dirsBatch);
     dirsBatch.clear();
 
-    if (buffer.size() >= KiB(24)) { flushBuffer(); }
+    if (buffer.size() >= KiB(8)) { flushBuffer(); }
     [[unlikely]] if (dirsInFlight.fetch_sub(count, std::memory_order_acq_rel) == count) {
       poison();
     }
   }
-
-  flushBuffer();
 };
