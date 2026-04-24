@@ -6,7 +6,6 @@
 #include <spdlog/spdlog.h>
 #include <span>
 #include <print>
-#include <stdexcept>
 
 struct Error {
   std::string message;
@@ -18,7 +17,8 @@ struct Result {
 };
 
 constexpr void printUsage(char* cmd) {
-  std::println("usage: {} <pattern> <filepath> [--option=<value>|-o=<value>]", cmd);
+  std::println(
+      "usage: {} <pattern> [<filepath1> <filepath2> ...] [--option=<value>|-o=<value>]", cmd);
   std::println("\nOptions:");
   std::println("--help,      -h   Show help.");
   std::println("--max-depth, -d   Set the maximum depth for directory traversal.");
@@ -71,7 +71,7 @@ void parseOption(std::string_view opt) {
     Result res = parseNumber(opt.begin() + pos, g_app->maxDepth, NumberSign::Positive);
     if (!res.success) {
       spdlog::error(res.error.message);
-      throw std::logic_error("invalid value for `max-depth` option");
+      exit(1);
     }
 
     spdlog::debug("parsed `maxDepth` with value: `{}`", g_app->maxDepth);
