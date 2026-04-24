@@ -114,14 +114,26 @@ bool init(std::span<char*> args) {
         printUsage(args[0]);
       }
       parseOption(args[i]);
-    } else if (g_app->pattern.empty()) {
-      g_app->pattern = string::String::from(args[i]);
+    } else if (g_app->pattern == nullptr) {
+      i32    errorNumber;
+      size_t errorOffset;
+
+      g_app->pattern = pcre2_compile(reinterpret_cast<u8*>(args[i]), PCRE2_ZERO_TERMINATED, 0,
+          &errorNumber, &errorOffset, NULL);
+
+      if (g_app->pattern == nullptr) {
+        PCRE2_UCHAR buffer[256];
+        pcre2_get_error_message(errorNumber, buffer, sizeof(buffer));
+        printf("PCRE2 compilation failed at offset %d: %s\n", (int)errorOffset, buffer);
+        exit(1);
+      }
+
     } else {
       parsePath(args[i]);
     }
   }
 
-  if (g_app->pattern.empty()) {
+  if (g_app->pattern == nullptr) {
     spdlog::error("no pattern provided");
     return false;
   }
@@ -143,5 +155,7 @@ i32 main(i32 argc, char** argv) {
   std::span<char*> args{argv, static_cast<size_t>(argc)};
   if (!init(args)) { return 1; }
   run();
+
+  pcre2_code_free(g_app->pattern);
   return 0;
 }

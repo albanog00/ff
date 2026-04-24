@@ -56,7 +56,7 @@ namespace string {
     }
 
   public:
-    String() = default;
+    String() noexcept = default;
 
     explicit String(u32 initialCapacity) { alloc(initialCapacity); }
 

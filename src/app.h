@@ -3,6 +3,14 @@
 #include "memory/types.h"
 #include "string/string.h"
 
+#define PCRE2_CODE_UNIT_WIDTH 8
+#include <pcre2.h>
+
+enum Search : u8 {
+  Linear = 0,
+  Regex  = 1,
+};
+
 struct FileType {
   enum FileTypeValue : u8 {
     None      = 1 << 0,
@@ -58,7 +66,7 @@ struct App {
   bool                        hidden{false};
   FileType                    type{FileType::None};
 
-  string::String              pattern{};
+  pcre2_code*                 pattern{nullptr};
   std::vector<string::String> paths{};
 };
 

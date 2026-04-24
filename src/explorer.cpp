@@ -2,7 +2,8 @@
 #include "app.h"
 #include "memory/types.h"
 
-#include <string_view>
+#include <pcre2.h>
+
 #include <sys/dir.h>
 #include <sys/stat.h>
 #include <spdlog/spdlog.h>
@@ -28,13 +29,20 @@ ExplorerContext::ExplorerContext(std::span<string::String> startPaths) {
 }
 
 void ExplorerContext::walk() {
-  static const std::string pattern       = g_app->pattern.string();
-  static const bool        is_pipe       = g_app->pipe;
-  static const bool        enqueueHidden = g_app->hidden;
-  static const u32         maxDepth      = g_app->maxDepth;
-  static const FileType    fileType      = g_app->type;
+  static pcre2_code*                    pattern = g_app->pattern;
+  thread_local static pcre2_match_data* match_data =
+      pcre2_match_data_create_from_pattern(pattern, 0);
 
-  auto                     isDirectory = [](string::String& fullPath, struct dirent* entry) {
+  if (!pattern) {
+    spdlog::error("provided pattern is invalid");
+    exit(1);
+  }
+
+  static const bool     enqueueHidden = g_app->hidden;
+  static const u32      maxDepth      = g_app->maxDepth;
+  static const FileType fileType      = g_app->type;
+
+  auto                  isDirectory = [](string::String& fullPath, struct dirent* entry) {
     if (entry->d_type == DT_DIR) {
       return true;
     } else if (entry->d_type == DT_UNKNOWN) {
@@ -65,35 +73,44 @@ void ExplorerContext::walk() {
     buffer.clear();
   };
 
-  auto findAndHighlightPattern = [&](std::string_view view) {
-    bool found = false;
-    u64  it    = 0;
+  auto findAndHighlightPattern = [&](const string::String& str) {
+    const u8* data = str.data();
+    i32       rc   = pcre2_match(pattern, data, str.size(), 0, 0, match_data, NULL);
+    if (rc >= 0) {
+      PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(match_data);
+      u64         lastIdx = 0;
 
-    while ((it = view.find(pattern)) != std::string::npos) {
-      found = true;
-      if (is_pipe) { break; }                         // no highlight in pipe mode
-      buffer.append(view.substr(0, it));              // append till start of pattern
-      buffer += "\033[31m";                           // color
-      buffer.append(view.substr(it, pattern.size())); // append pattern
-      buffer += "\033[0m";                            // reset color
-      view.remove_prefix(it + pattern.size());
-    }
+      // Skip first entry because it corresponds to the entire match
+      // TODO: change colors for each group
+      for (i32 i = 1; i < rc; ++i) {
+        u64 startIdx = ovector[2 * i];
+        u64 endIdx   = ovector[2 * i + 1];
+        u64 len      = endIdx - startIdx;
 
-    if (found) {
-      buffer.append(view); // append rest of string
+        buffer.append(data + lastIdx, startIdx - lastIdx);
+
+        const u8* start = data + startIdx;
+        buffer += "\033[31m"; // color
+        buffer.append(start, len);
+        buffer += "\033[0m"; // reset color
+
+        lastIdx = endIdx;
+      }
+
+      buffer.append(data + lastIdx, str.size() - lastIdx);
       buffer += "\n";
     }
   };
 
-  auto              ret = std::experimental::scope_exit(flushBuffer);
+  auto              ret = std::experimental::scope_exit([&] {
+    flushBuffer();
+    pcre2_match_data_free(match_data);
+  });
 
   std::vector<Task> dirsBatch;
   dirsBatch.reserve(1024);
 
   std::array<Task, 16> tasks;
-
-  // Add max-depth
-  // Simple way: struct with directory level
 
   while (true) {
     u32 count = dequeueBulk(tasks);
@@ -118,7 +135,7 @@ void ExplorerContext::walk() {
             auto [fullPath, isDir] = buildPath(dirPath, entry);
             if ((fileType == FileType::None) || ((fileType & FileType::Directory) > 0 && isDir) ||
                 ((fileType & FileType::File) > 0 && !isDir)) {
-              findAndHighlightPattern(fullPath.view());
+              findAndHighlightPattern(fullPath);
             }
 
             if (fullPath.back() == '/') {

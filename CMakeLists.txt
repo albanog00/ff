@@ -26,6 +26,18 @@ if (spdlog_FOUND)
     target_link_libraries(${PROJECT_NAME} spdlog::spdlog $<$<BOOL:${MINGW}>:ws2_32>)
 endif()
 
+find_library(PCRE2_LIBRARIES NAMES pcre2 pcre2-8)
+find_path(PCRE2_INCLUDE_DIRS pcre2.h)
+
+if(PCRE2_LIBRARIES AND PCRE2_INCLUDE_DIRS)
+    message(STATUS "PCRE2 libs: ${PCRE2_LIBRARIES}")
+    message(STATUS "PCRE2 include directory: ${PCRE2_INCLUDE_DIRS}")
+    include_directories(${PCRE2_INCLUDE_DIRS})
+    target_link_libraries(${PROJECT_NAME} ${PCRE2_LIBRARIES})
+else()
+    message(STATUS "PCRE2 library not found.")
+endif()
+
 if (CMAKE_BUILD_TYPE)
     string(TOLOWER ${CMAKE_BUILD_TYPE} BUILDTYPE_LOWER)
 

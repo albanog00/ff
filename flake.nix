@@ -34,8 +34,8 @@
 
               perf
 
-              # Logging
-              spdlog
+              spdlog # Logging
+              pcre2.dev # Regex
             ]
             ++ pkgs.lib.optional pkgs.stdenv.isLinux [];
 
