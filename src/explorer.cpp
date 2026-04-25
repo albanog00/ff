@@ -94,6 +94,7 @@ void ExplorerContext::walk() {
       u64         lastIdx = 0;
 
       if (!isPipe) {
+        // append until start of matched substring
         buffer.append(data + lastIdx, ovector[0] - lastIdx);
         buffer += "\033[1m\033[3m"; // bold, italic text
         lastIdx = ovector[0];
@@ -118,6 +119,7 @@ void ExplorerContext::walk() {
         buffer += "\033[0m"; // reset color
       }
 
+      // append rest of string
       buffer.append(data + lastIdx, str.size() - lastIdx);
       buffer += "\n";
     }
@@ -169,12 +171,13 @@ void ExplorerContext::walk() {
           closedir(dirHandle);
         }
       }
+
+      flushBuffer();
     }
 
     enqueueBulk(dirsBatch);
     dirsBatch.clear();
 
-    if (buffer.size() >= KiB(8)) { flushBuffer(); }
     [[unlikely]] if (dirsInFlight.fetch_sub(count, std::memory_order_acq_rel) == count) {
       poison();
     }
