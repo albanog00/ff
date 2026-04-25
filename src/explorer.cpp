@@ -38,6 +38,7 @@ void ExplorerContext::walk() {
     exit(1);
   }
 
+  static const bool     isPipe        = g_app->pipe;
   static const bool     enqueueHidden = g_app->hidden;
   static const u32      maxDepth      = g_app->maxDepth;
   static const FileType fileType      = g_app->type;
@@ -74,27 +75,47 @@ void ExplorerContext::walk() {
   };
 
   auto findAndHighlightPattern = [&](const string::String& str) {
+    static const std::array<const char*, 7> colors = {
+        "\033[31;1m",
+        "\033[32;1m",
+        "\033[33;1m",
+        "\033[34;1m",
+        "\033[35;1m",
+        "\033[36;1m",
+        "\033[37;1m",
+    };
+
+    auto      it   = colors.cbegin();
     const u8* data = str.data();
-    i32       rc   = pcre2_match(pattern, data, str.size(), 0, 0, match_data, NULL);
+
+    i32       rc = pcre2_match(pattern, data, str.size(), 0, 0, match_data, NULL);
     if (rc >= 0) {
       PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(match_data);
       u64         lastIdx = 0;
 
-      // Skip first entry because it corresponds to the entire match
-      // TODO: change colors for each group
-      for (i32 i = 1; i < rc; ++i) {
-        u64 startIdx = ovector[2 * i];
-        u64 endIdx   = ovector[2 * i + 1];
-        u64 len      = endIdx - startIdx;
+      if (!isPipe) {
+        buffer.append(data + lastIdx, ovector[0] - lastIdx);
+        buffer += "\033[1m\033[3m"; // bold, italic text
+        lastIdx = ovector[0];
 
-        buffer.append(data + lastIdx, startIdx - lastIdx);
+        for (i32 i = 0; i < rc; ++i) {
+          if (rc > 1 && i == 0) { continue; }
+          u64 startIdx = ovector[2 * i];
+          u64 endIdx   = ovector[2 * i + 1];
+          u64 len      = endIdx - startIdx;
 
-        const u8* start = data + startIdx;
-        buffer += "\033[31m"; // color
-        buffer.append(start, len);
+          buffer.append(data + lastIdx, startIdx - lastIdx);
+          const u8* start = data + startIdx;
+
+          buffer += *it;
+          if (++it == colors.cend()) { it = colors.cbegin(); }
+
+          buffer.append(start, len);
+          buffer += "\033[30m"; // black
+          lastIdx = endIdx;
+        }
+
         buffer += "\033[0m"; // reset color
-
-        lastIdx = endIdx;
       }
 
       buffer.append(data + lastIdx, str.size() - lastIdx);
