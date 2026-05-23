@@ -1,13 +1,22 @@
 #include "explorer.h"
 #include "app.h"
+
 #include "memory/types.h"
+#include "string/string.h"
 
-#include <pcre2.h>
+#if DEBUG
+#include "memory/arc.h"
+#endif
 
+#include <cstring>
 #include <sys/dir.h>
 #include <sys/stat.h>
+#include <fcntl.h>
+
+#include <pcre2.h>
 #include <spdlog/spdlog.h>
 #include <experimental/scope>
+#include <unistd.h>
 
 ExplorerContext::ExplorerContext(std::span<string::String> startPaths) {
   u32 failed = 0;
@@ -28,6 +37,25 @@ ExplorerContext::ExplorerContext(std::span<string::String> startPaths) {
   }
 }
 
+static inline bool isDirectory(struct dirent* entry, i32 dirFd) {
+  if (entry->d_type == DT_DIR) {
+    return true;
+  } else if (entry->d_type == DT_UNKNOWN) {
+    struct stat st;
+    return (fstatat(dirFd, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) == 0) && S_ISDIR(st.st_mode);
+  }
+  return false;
+};
+
+string::String buildPath(string::String& rootPath, struct dirent* entry, bool isDir) {
+  static thread_local string::String pathBuffer{KiB(4)};
+  pathBuffer = rootPath;
+  if (rootPath.back() != '/') { pathBuffer += "/"; }
+  pathBuffer.append(entry->d_name);
+  if (isDir) { pathBuffer += "/"; }
+  return pathBuffer;
+};
+
 void ExplorerContext::walk() {
   static pcre2_code* pattern = g_app->pattern;
 
@@ -36,34 +64,20 @@ void ExplorerContext::walk() {
     exit(1);
   }
 
-  pcre2_match_data*     match_data = pcre2_match_data_create_from_pattern(pattern, 0);
+  pcre2_match_data* match_data = pcre2_match_data_create_from_pattern(pattern, 0);
+  defer(pcre2_match_data_free(match_data));
 
-  static const bool     isPipe                = g_app->pipe;
-  static const bool     enqueueHidden         = g_app->hidden;
-  static const u32      maxDepth              = g_app->maxDepth;
-  static const FileType fileType              = g_app->type;
-  static const u32      OutBufferCapacity     = KiB(32) - 1;
-  static const u32      MaxBufferRetainedSize = KiB(24);
+#if DEBUG
+  defer(spdlog::debug("thread_id={} buffer_capacity={}", pthread_self(), buffer.capacity()));
+  defer(string::String::dumpPoolStats());
+#endif
 
-  auto                  isDirectory = [](string::String& fullPath, struct dirent* entry) {
-    if (entry->d_type == DT_DIR) {
-      return true;
-    } else if (entry->d_type == DT_UNKNOWN) {
-      struct stat st;
-      return (stat(fullPath.c_str(), &st) == 0) && S_ISDIR(st.st_mode);
-    }
-    return false;
-  };
-
-  auto buildPath = [&](string::String& rootPath, struct dirent* entry) {
-    static thread_local string::String pathBuffer{KiB(4)};
-    pathBuffer = rootPath;
-    if (rootPath.back() != '/') { pathBuffer += "/"; }
-    pathBuffer.append(entry->d_name);
-    bool isDir = isDirectory(pathBuffer, entry);
-    if (isDir) { pathBuffer += "/"; }
-    return std::pair(pathBuffer, isDir);
-  };
+  static const bool           isPipe                = g_app->pipe;
+  static const bool           enqueueHidden         = g_app->hidden;
+  static const u32            maxDepth              = g_app->maxDepth;
+  static const FileType       fileType              = g_app->type;
+  static const u32            OutBufferCapacity     = KiB(32) - 1;
+  static const u32            MaxBufferRetainedSize = KiB(24);
 
   thread_local string::String buffer{OutBufferCapacity};
   auto                        flushBuffer = [&] {
@@ -76,6 +90,8 @@ void ExplorerContext::walk() {
     }
     buffer.clear();
   };
+
+  defer(flushBuffer());
 
   auto findAndHighlightPattern = [&](const string::String& str) {
     static const std::array<const char*, 7> colors = {
@@ -92,9 +108,9 @@ void ExplorerContext::walk() {
     const u8* data = str.data();
 
     i32       rc = pcre2_match(pattern, data, str.size(), 0, 0, match_data, NULL);
-    if (rc >= 0) {
+    if (rc > 0) {
       PCRE2_SIZE* ovector = pcre2_get_ovector_pointer(match_data);
-      u64         lastIdx = 0;
+      u32         lastIdx = 0;
 
       if (!isPipe) {
         // append until start of matched substring
@@ -102,21 +118,23 @@ void ExplorerContext::walk() {
         buffer += "\033[1m\033[3m"; // bold, italic text
         lastIdx = ovector[0];
 
-        for (i32 i = 0; i < rc; ++i) {
-          if (rc > 1 && i == 0) { continue; }
-          u64 startIdx = ovector[2 * i];
-          u64 endIdx   = ovector[2 * i + 1];
+        i32 i = rc > 1; // 1 or 0
+        while (i < rc) {
+          u32 startIdx = ovector[2 * i];
+          u32 endIdx   = ovector[2 * i + 1];
           u64 len      = endIdx - startIdx;
 
           buffer.append(data + lastIdx, startIdx - lastIdx);
           const u8* start = data + startIdx;
 
+          // set color for current group match
           buffer += *it;
           if (++it == colors.cend()) { it = colors.cbegin(); }
 
           buffer.append(start, len);
           buffer += "\033[30m"; // black
           lastIdx = endIdx;
+          i += 1;
         }
 
         buffer += "\033[0m"; // reset color
@@ -128,65 +146,112 @@ void ExplorerContext::walk() {
     }
   };
 
-  auto ret = std::experimental::scope_exit([&] {
-    flushBuffer();
-    pcre2_match_data_free(match_data);
-
-#if DEBUG
-    spdlog::debug("thread_id={} buffer_capacity={}", pthread_self(), buffer.capacity());
-    string::String::dumpPoolStats();
-#endif
-  });
-
   std::vector<Task> dirsBatch;
   dirsBatch.reserve(1024);
 
-  std::array<Task, 16> tasks;
+  std::array<Task, 64> tasks;
+  bool                 loop = true;
 
-  while (true) {
+  while (loop) {
     u32 count = dequeueBulk(tasks);
 
     for (u32 i = 0; i < count; ++i) {
       Task& task = tasks[i];
-      [[unlikely]] if (task.fullPath == POISON) {
+      if (loop && task.fullPath == POISON) [[unlikely]] {
         enqueue(std::move(task));
-        return;
+        loop = false;
+        continue;
       }
 
       string::String& dirPath = task.fullPath;
-      [[likely]] if (!(dirPath.startsWith("/proc/"))) {
-        DIR*           dirHandle;
-        struct dirent* entry;
+      DIR*            dirHandle;
+      struct dirent*  entry;
 
-        [[likely]] if ((dirHandle = opendir(dirPath.c_str())) != NULL) {
-          while ((entry = readdir(dirHandle)) != NULL) {
-            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) { continue; }
-            if (!enqueueHidden && entry->d_name[0] == '.') { continue; }
+      if ((dirHandle = opendir(dirPath.c_str())) != NULL) [[likely]] {
+        defer(closedir(dirHandle));
+        i32 dirFd = dirfd(dirHandle);
 
-            auto [fullPath, isDir] = buildPath(dirPath, entry);
-            if ((fileType == FileType::None) || ((fileType & FileType::Directory) > 0 && isDir) ||
-                ((fileType & FileType::File) > 0 && !isDir)) {
-              findAndHighlightPattern(fullPath);
-            }
+        // try open .gitignore in current dir
+        i32 gitignoreFd;
+        if (gitignoreFd = openat(dirFd, ".gitignore", O_RDONLY); gitignoreFd != -1) {
+          defer(close(gitignoreFd));
+          // gitignore file found
+          string::String             gitignoreFullPath = dirPath + ".gitignore";
+          memory::Arc<memory::Arena> scratch           = getLocalScratchArena();
 
-            if (fullPath.back() == '/') {
-              if (maxDepth > 0 && task.directoryLevel + 1 == maxDepth) { continue; }
-              dirsInFlight.fetch_add(1, std::memory_order_acq_rel);
-              dirsBatch.emplace_back(std::move(fullPath), task.directoryLevel + 1);
-            }
+          spdlog::debug("opened {} at fd {}", gitignoreFullPath.c_str(), gitignoreFd);
 
-            if (buffer.size() >= MaxBufferRetainedSize) { flushBuffer(); }
+          // get byte file size by seeking to end
+          i64 size = lseek(gitignoreFd, 0, SEEK_END);
+          lseek(gitignoreFd, 0, SEEK_SET); // reset to offset 0
+
+          // 64 bytes aligned - reused memory, contains old values
+          u8* fileBuffer   = static_cast<u8*>(scratch->alloc(size + 1, 64));
+          fileBuffer[size] = 0;
+
+          // read file until eof
+          i32 bufOffset = 0;
+          while (bufOffset < size) {
+            i32 got = read(gitignoreFd, fileBuffer + bufOffset, size - bufOffset);
+            if (got == 0) { break; }
+            bufOffset += got;
           }
 
-          closedir(dirHandle);
+          // read file and evaluate glob patterns from .gitignore files
+          const u8* newLine     = nullptr;
+          u64       startOffset = 0;
+          bool      scanning    = true;
+
+          while (scanning) {
+            u8* start = fileBuffer + startOffset;
+            newLine   = static_cast<u8*>(memchr(start, '\n', size));
+
+            if (newLine == nullptr) {
+              // treat last char as newline
+              newLine  = fileBuffer + size;
+              scanning = false;
+            }
+
+            // start of next line
+            startOffset = newLine - fileBuffer + 1;
+          }
+
+          // work done
+        }
+
+        // scan dir entries
+        while ((entry = readdir(dirHandle)) != NULL) {
+          if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) [[unlikely]] {
+            continue;
+          }
+          // TODO: apply .gitignore rules
+
+          // skip hidden when hidden flag is not enabled
+          if (entry->d_name[0] == '.' && !enqueueHidden) { continue; }
+
+          bool           isDir    = isDirectory(entry, dirFd);
+          string::String fullPath = buildPath(dirPath, entry, isDir);
+
+          if ((fileType == FileType::None) || ((fileType & FileType::Directory) > 0 && isDir) ||
+              ((fileType & FileType::File) > 0 && !isDir)) {
+            findAndHighlightPattern(fullPath);
+          }
+
+          if (buffer.size() >= MaxBufferRetainedSize) { flushBuffer(); }
+
+          if (isDir) {
+            if (maxDepth > 0 && task.directoryLevel + 1 == maxDepth) { continue; }
+            dirsInFlight.fetch_add(1, std::memory_order_acq_rel);
+            dirsBatch.emplace_back(std::move(fullPath), task.directoryLevel + 1);
+          }
         }
       }
+
+      enqueueBulk(dirsBatch);
+      dirsBatch.clear();
     }
 
-    enqueueBulk(dirsBatch);
-    dirsBatch.clear();
-
-    [[unlikely]] if (dirsInFlight.fetch_sub(count, std::memory_order_acq_rel) == count) {
+    if (dirsInFlight.fetch_sub(count, std::memory_order_acq_rel) == count) [[unlikely]] {
       poison();
     }
   }
