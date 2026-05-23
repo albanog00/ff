@@ -61,6 +61,10 @@ private:
 };
 
 struct App {
+  ~App() {
+    if (pattern) { pcre2_code_free(pattern); }
+  }
+
   u32                         maxDepth{0};
   bool                        pipe{false};
   bool                        hidden{false};
