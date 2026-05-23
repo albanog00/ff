@@ -4,10 +4,6 @@
 #include "memory/types.h"
 #include "string/string.h"
 
-#if DEBUG
-#include "memory/arc.h"
-#endif
-
 #include <cstring>
 #include <sys/dir.h>
 #include <sys/stat.h>
@@ -16,7 +12,6 @@
 #include <pcre2.h>
 #include <spdlog/spdlog.h>
 #include <experimental/scope>
-#include <unistd.h>
 
 ExplorerContext::ExplorerContext(std::span<string::String> startPaths) {
   u32 failed = 0;
@@ -67,11 +62,6 @@ void ExplorerContext::walk() {
   pcre2_match_data* match_data = pcre2_match_data_create_from_pattern(pattern, 0);
   defer(pcre2_match_data_free(match_data));
 
-#if DEBUG
-  defer(spdlog::debug("thread_id={} buffer_capacity={}", pthread_self(), buffer.capacity()));
-  defer(string::String::dumpPoolStats());
-#endif
-
   static const bool           isPipe                = g_app->pipe;
   static const bool           enqueueHidden         = g_app->hidden;
   static const u32            maxDepth              = g_app->maxDepth;
@@ -92,6 +82,10 @@ void ExplorerContext::walk() {
   };
 
   defer(flushBuffer());
+#if DEBUG
+  defer(spdlog::debug("thread_id={} buffer_capacity={}", pthread_self(), buffer.capacity()));
+  defer(string::String::dumpPoolStats());
+#endif
 
   auto findAndHighlightPattern = [&](const string::String& str) {
     static const std::array<const char*, 7> colors = {
@@ -176,17 +170,19 @@ void ExplorerContext::walk() {
         if (gitignoreFd = openat(dirFd, ".gitignore", O_RDONLY); gitignoreFd != -1) {
           defer(close(gitignoreFd));
           // gitignore file found
-          string::String             gitignoreFullPath = dirPath + ".gitignore";
-          memory::Arc<memory::Arena> scratch           = getLocalScratchArena();
+          memory::TempArena scratch = memory::getLocalScratchArena();
 
+#if DEBUG
+          string::String gitignoreFullPath = dirPath + ".gitignore";
           spdlog::debug("opened {} at fd {}", gitignoreFullPath.c_str(), gitignoreFd);
+#endif
 
           // get byte file size by seeking to end
           i64 size = lseek(gitignoreFd, 0, SEEK_END);
           lseek(gitignoreFd, 0, SEEK_SET); // reset to offset 0
 
           // 64 bytes aligned - reused memory, contains old values
-          u8* fileBuffer   = static_cast<u8*>(scratch->alloc(size + 1, 64));
+          u8* fileBuffer   = static_cast<u8*>(scratch.arena.alloc(size + 1, 64));
           fileBuffer[size] = 0;
 
           // read file until eof
@@ -204,7 +200,7 @@ void ExplorerContext::walk() {
 
           while (scanning) {
             u8* start = fileBuffer + startOffset;
-            newLine   = static_cast<u8*>(memchr(start, '\n', size));
+            newLine   = static_cast<u8*>(memchr(start, '\n', size - startOffset));
 
             if (newLine == nullptr) {
               // treat last char as newline
@@ -214,6 +210,8 @@ void ExplorerContext::walk() {
 
             // start of next line
             startOffset = newLine - fileBuffer + 1;
+
+            // TODO: parse lines
           }
 
           // work done
@@ -224,13 +222,14 @@ void ExplorerContext::walk() {
           if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) [[unlikely]] {
             continue;
           }
-          // TODO: apply .gitignore rules
 
           // skip hidden when hidden flag is not enabled
           if (entry->d_name[0] == '.' && !enqueueHidden) { continue; }
 
           bool           isDir    = isDirectory(entry, dirFd);
           string::String fullPath = buildPath(dirPath, entry, isDir);
+
+          // TODO: apply .gitignore rules
 
           if ((fileType == FileType::None) || ((fileType & FileType::Directory) > 0 && isDir) ||
               ((fileType & FileType::File) > 0 && !isDir)) {

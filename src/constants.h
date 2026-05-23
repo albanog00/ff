@@ -2,7 +2,6 @@
 
 #include "memory/types.h"
 #include "memory/arena.h"
-#include "memory/arc.h"
 #include "queue/blockingconcurrentqueue.h"
 #include "queue/concurrentqueue.h"
 #include "task.h"
@@ -19,12 +18,6 @@ struct QueueTraits : moodycamel::ConcurrentQueueDefaultTraits {
 };
 
 using BlockingQueue = moodycamel::BlockingConcurrentQueue<Task, QueueTraits>;
-
-inline memory::Arc<memory::Arena> getLocalScratchArena() {
-  static thread_local memory::Arc<memory::Arena> scratch(MiB(64));
-  if (scratch.count() == 1) { scratch->reset(); }
-  return scratch;
-}
 
 template <typename F>
 struct privDefer {

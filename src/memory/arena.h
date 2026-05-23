@@ -142,4 +142,16 @@ namespace memory {
     static UP<Arena> arena = std::make_unique<Arena>(GiB(1));
     return *arena;
   }
+
+  struct TempArena {
+    TempArena(Arena& arena) : arena(arena) {}
+    ~TempArena() { arena.reset(); }
+
+    Arena& arena;
+  };
+
+  inline TempArena getLocalScratchArena() {
+    static thread_local memory::Arena scratch(MiB(64));
+    return TempArena(scratch);
+  }
 }
