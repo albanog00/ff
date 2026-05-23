@@ -63,8 +63,6 @@ namespace memory {
     }
 
   public:
-    Arena() = delete;
-
     // non-copyable/movable
     Arena(const Arena&)            = delete;
     Arena(Arena&&)                 = delete;
@@ -104,7 +102,7 @@ namespace memory {
     ~Arena() { munmap((void*)block_, reservedSize); }
 
     void* alloc(u64 size, u64 alignment = alignof(std::max_align_t)) {
-      assert((alignment & (alignment - 1)) == 0 && "alignment now power of 2");
+      assert((alignment & (alignment - 1)) == 0 && "alignment not power of 2");
       if (size == 0) { return nullptr; }
 
       u64 current = currentOffset.load(std::memory_order_relaxed);
@@ -123,6 +121,8 @@ namespace memory {
         }
       }
 
+      spdlog::error("arena allocation failed: size={} alignment={} currentOffset={}", size,
+          alignment, currentOffset.load(std::memory_order_relaxed));
       return nullptr;
     }
 
@@ -130,6 +130,11 @@ namespace memory {
 
     inline bool owns(const void* ptr) const {
       return ptr < block_ + currentOffset.load(std::memory_order_relaxed) && ptr >= block_;
+    }
+
+    inline void reset() {
+      std::lock_guard lk(commitMutex);
+      currentOffset.store(0, std::memory_order_release);
     }
   };
 

@@ -4,6 +4,7 @@
 #include <cstring>
 #include <filesystem>
 #include <spdlog/spdlog.h>
+#include <spdlog/sinks/stdout_color_sinks.h>
 #include <span>
 #include <print>
 
@@ -103,6 +104,15 @@ void parsePath(const char* p) {
 }
 
 bool init(std::span<char*> args) {
+  // set default logger on stderr
+  spdlog::set_default_logger(spdlog::stderr_color_mt("stderr"));
+
+#ifdef DEBUG
+  spdlog::set_level(spdlog::level::debug);
+#else
+  spdlog::set_level(spdlog::level::info);
+#endif
+
   if (args.size() <= 1) { printUsage(args[0]); }
 
   // is output piped?
@@ -122,7 +132,7 @@ bool init(std::span<char*> args) {
           &errorNumber, &errorOffset, NULL);
 
       if (g_app->pattern == nullptr) {
-        PCRE2_UCHAR buffer[256];
+        u8 buffer[256];
         pcre2_get_error_message(errorNumber, buffer, sizeof(buffer));
         printf("PCRE2 compilation failed at offset %d: %s\n", (int)errorOffset, buffer);
         exit(1);
@@ -149,13 +159,14 @@ bool init(std::span<char*> args) {
 void run() {
   ExplorerContext explorerCtx{g_app->paths};
   explorerCtx.join();
+#if DEBUG
+  string::String::dumpPoolStats();
+#endif
 }
 
 i32 main(i32 argc, char** argv) {
   std::span<char*> args{argv, static_cast<size_t>(argc)};
   if (!init(args)) { return 1; }
   run();
-
-  pcre2_code_free(g_app->pattern);
   return 0;
 }

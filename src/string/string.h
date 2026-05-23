@@ -10,20 +10,18 @@
 namespace string {
   struct String {
   private:
-    u8*                          data_{nullptr};
-    u32                          capacity_{0};
-    u32                          size_{0};
+    u8*  data_{nullptr};
+    u32  capacity_{0};
+    u32  size_{0};
 
-    static inline StringPool<u8> pool{};
-
-    void                         alloc(u32 size) {
-      data_    = pool.acquire(size, capacity_);
+    void alloc(u32 size) {
+      data_    = u8StringPool.acquire(size, capacity_);
       size_    = 0;
       data_[0] = 0;
     }
 
     void release() {
-      if (data_) { pool.release(data_, capacity_); }
+      if (data_) { u8StringPool.release(data_, capacity_); }
       data_     = nullptr;
       size_     = 0;
       capacity_ = 0;
@@ -32,7 +30,7 @@ namespace string {
     void realloc(u32 minSize) {
       u32 newCapacity = 0;
       u32 size        = size_;
-      u8* newData     = pool.acquire(minSize, newCapacity);
+      u8* newData     = u8StringPool.acquire(minSize, newCapacity);
 
       if (size_ > 0) { memcpy(newData, data_, size); }
       newData[size] = 0;
@@ -91,7 +89,11 @@ namespace string {
     std::string      string() const { return data_ ? std::string{c_str(), size_} : ""; }
     std::string_view view() const { return data_ ? std::string_view{c_str(), size_} : ""; }
 
-    static String    from(const u8* buf, u32 size) {
+#if DEBUG
+    static void dumpPoolStats() { u8StringPool.dumpStats(); }
+#endif
+
+    static String from(const u8* buf, u32 size) {
       if (!buf || size == 0) { return String{}; }
       String str(size);
       memcpy(str.data_, buf, size);
@@ -136,6 +138,8 @@ namespace string {
       return size_ >= len && memcmp(data_, prefix, len) == 0;
     }
 
+    inline u8   operator[](u32 index) const { return data_[index]; }
+
     inline void clear() {
       size_ = 0;
       if (data_) { data_[0] = 0; }
@@ -148,16 +152,23 @@ namespace string {
       data_[size_] = 0;
     }
 
-    void        append(const char* o, u32 size) { append(reinterpret_cast<const u8*>(o), size); }
-    void        append(const String& o) { append(o.data_, o.size_); }
-    void        append(const char* o) { append(o, strlen(o)); }
-    void        append(const std::string& o) { append(o.data(), o.size()); }
-    void        append(const std::string_view& o) { append(o.data(), o.size()); }
+    void   append(const char* o, u32 size) { append(reinterpret_cast<const u8*>(o), size); }
+    void   append(const String& o) { append(o.data_, o.size_); }
+    void   append(const char* o) { append(o, strlen(o)); }
+    void   append(const std::string& o) { append(o.data(), o.size()); }
+    void   append(const std::string_view& o) { append(o.data(), o.size()); }
 
-    void        operator+=(const String& o) { append(o); }
-    void        operator+=(const char* o) { append(o); }
-    void        operator+=(const std::string& o) { append(o); }
-    void        operator+=(const std::string_view& o) { append(o); }
+    void   operator+=(const String& o) { append(o); }
+    void   operator+=(const char* o) { append(o); }
+    void   operator+=(const std::string& o) { append(o); }
+    void   operator+=(const std::string_view& o) { append(o); }
+
+    String operator+(const char* o) const {
+      String str(size_ + strlen(o));
+      str.copy(*this);
+      str.append(o);
+      return str;
+    }
 
     inline bool empty() const { return size_ == 0; }
 
