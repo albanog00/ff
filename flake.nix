@@ -1,5 +1,5 @@
 {
-  description = "A very basic flake for a very basic implementation of a very basic image viewer";
+  description = "A very basic flake for a very basic implementation of a very basic file crawler";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
@@ -66,6 +66,7 @@
 
           buildInputs = with pkgs; [
             spdlog
+            pcre2.dev
           ];
 
           meta = {

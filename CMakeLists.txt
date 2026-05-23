@@ -1,7 +1,9 @@
 cmake_minimum_required(VERSION 3.22)
 
 project(fgrep LANGUAGES CXX C)
+
 include(GNUInstallDirs)
+include(CheckIPOSupported)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -39,52 +41,56 @@ else()
 endif()
 
 if (CMAKE_BUILD_TYPE)
-    string(TOLOWER ${CMAKE_BUILD_TYPE} BUILDTYPE_LOWER)
+  string(TOLOWER ${CMAKE_BUILD_TYPE} BUILDTYPE_LOWER)
+  target_compile_options(${PROJECT_NAME} PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+    # -Wconversion
+    -Wshadow
+    -Wformat=2
+    -Wnull-dereference
+    -Wdouble-promotion
+    -Wimplicit-fallthrough
+    -Wno-missing-field-initializers
+  )
 
-    if(${BUILDTYPE_LOWER} STREQUAL "debug")
-        target_compile_options(${PROJECT_NAME} PRIVATE
-            -g                               # Debug symbols
-            -Wall                            # All warnings
-            -Wextra                          # Extra warnings
-            -Wno-missing-field-initializers  #
-            -fsanitize=undefined             # UB sanitizer (null deref, overflow, etc.)
-            -fno-omit-frame-pointer          # Better stack traces with sanitizers
-        )
+  if(${BUILDTYPE_LOWER} STREQUAL "debug")
+    target_compile_options(${PROJECT_NAME} PRIVATE
+      -g                               # Debug symbols
+      -fsanitize=address,undefined             # UB sanitizer (null deref, overflow, etc.)
+      -fno-omit-frame-pointer          # Better stack traces with sanitizers
+    )
 
-        target_link_options(${PROJECT_NAME} PRIVATE
-            -fsanitize=undefined        # Link UBSan runtime
-        )
+    target_link_options(${PROJECT_NAME} PRIVATE
+      -fsanitize=address,undefined        # Link UBSan runtime
+    )
 
-        target_compile_definitions(${PROJECT_NAME} PRIVATE
-            DEBUG                       # Define DEBUG macro
-        )
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+      DEBUG                       # Define DEBUG macro
+    )
 
-        add_compile_options(
-            -fsanitize=address          # Address sanitizer (heap errors, leaks)
-        )
+    add_link_options(-static-libasan)
+  else()
+    target_compile_options(${PROJECT_NAME} PRIVATE
+      -O3
+      -Werror                          # Treat warning as errors
+    )
 
-        add_link_options(
-            -fsanitize=address          # Link ASan runtime
-            -static-libasan
-        )
-    else()
-      target_compile_options(${PROJECT_NAME} PRIVATE
-          -O3                              # Aggressive optimization
-          -Wall                            # All warnings
-          -Werror                          # Treat warning as errors
-          -Wextra                          # Extra warnings
-          -Wno-missing-field-initializers  #
-          -flto                            # Link-time optimization
-      )
+    target_compile_definitions(${PROJECT_NAME} PRIVATE
+      NDEBUG                      # Disable asserts
+    )
+  endif()
 
-      target_link_options(${PROJECT_NAME} PRIVATE
-          -flto                       # LTO at link time
-      )
+  check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
 
-      target_compile_definitions(${PROJECT_NAME} PRIVATE
-          NDEBUG                      # Disable asserts
-      )
-    endif()
+  if(ipo_supported)
+    set_property(TARGET ${PROJECT_NAME}
+        PROPERTY INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE
+    )
+  else()
+    message(WARNING "IPO/LTO not supported: ${ipo_error}")
+  endif()
 
 endif()
 

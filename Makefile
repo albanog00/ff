@@ -9,6 +9,9 @@ debug:
 clear:
 	rm -rf build
 
+install:
+	cmake --build build --target install
+
 all:
 	$(MAKE) clear
 	$(MAKE) release
