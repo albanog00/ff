@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.22)
 
-project(fgrep LANGUAGES CXX C)
+project(ff LANGUAGES CXX C)
 
 include(GNUInstallDirs)
 include(CheckIPOSupported)

@@ -1,5 +1,5 @@
 {
-  description = "A very basic flake for a very basic implementation of a very basic file crawler";
+  description = "A fast and small file crawler in C++";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
@@ -53,7 +53,7 @@
         pkgs = nixpkgs.legacyPackages."${system}";
       in {
         default = pkgs.llvmPackages_21.stdenv.mkDerivation {
-          pname = "fgrep";
+          pname = "ff";
           version = "0.0.1";
           src = pkgs.nix-gitignore.gitignoreSource [] ./.;
 
@@ -70,8 +70,8 @@
           ];
 
           meta = {
-            description = "fgrep";
-            mainProgram = "fgrep";
+            description = "ff";
+            mainProgram = "ff";
           };
         };
       }
