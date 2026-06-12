@@ -159,9 +159,6 @@ bool init(std::span<char*> args) {
 void run() {
   ExplorerContext explorerCtx{g_app->paths};
   explorerCtx.join();
-#if DEBUG
-  string::String::dumpPoolStats();
-#endif
 }
 
 i32 main(i32 argc, char** argv) {

@@ -29,19 +29,21 @@ ExplorerContext::ExplorerContext(std::span<string::String> startPaths) {
 }
 
 void ExplorerContext::walk() {
-  static pcre2_code*                    pattern = g_app->pattern;
-  thread_local static pcre2_match_data* match_data =
-      pcre2_match_data_create_from_pattern(pattern, 0);
+  static pcre2_code* pattern = g_app->pattern;
 
   if (!pattern) {
     spdlog::error("provided pattern is invalid");
     exit(1);
   }
 
-  static const bool     isPipe        = g_app->pipe;
-  static const bool     enqueueHidden = g_app->hidden;
-  static const u32      maxDepth      = g_app->maxDepth;
-  static const FileType fileType      = g_app->type;
+  pcre2_match_data*     match_data = pcre2_match_data_create_from_pattern(pattern, 0);
+
+  static const bool     isPipe                = g_app->pipe;
+  static const bool     enqueueHidden         = g_app->hidden;
+  static const u32      maxDepth              = g_app->maxDepth;
+  static const FileType fileType              = g_app->type;
+  static const u32      OutBufferCapacity     = KiB(32) - 1;
+  static const u32      MaxBufferRetainedSize = KiB(24);
 
   auto                  isDirectory = [](string::String& fullPath, struct dirent* entry) {
     if (entry->d_type == DT_DIR) {
@@ -63,11 +65,12 @@ void ExplorerContext::walk() {
     return std::pair(pathBuffer, isDir);
   };
 
-  thread_local string::String buffer{KiB(16)};
+  thread_local string::String buffer{OutBufferCapacity};
   auto                        flushBuffer = [&] {
     u64 written = 0;
-    while (written < buffer.size()) {
-      ssize_t n = write(STDOUT_FILENO, buffer.c_str() + written, buffer.size() - written);
+    u64 size    = buffer.size();
+    while (written < size) {
+      ssize_t n = write(STDOUT_FILENO, buffer.c_str() + written, size - written);
       if (n <= 0) { break; }
       written += static_cast<u64>(n);
     }
@@ -125,9 +128,14 @@ void ExplorerContext::walk() {
     }
   };
 
-  auto              ret = std::experimental::scope_exit([&] {
+  auto ret = std::experimental::scope_exit([&] {
     flushBuffer();
     pcre2_match_data_free(match_data);
+
+#if DEBUG
+    spdlog::debug("thread_id={} buffer_capacity={}", pthread_self(), buffer.capacity());
+    string::String::dumpPoolStats();
+#endif
   });
 
   std::vector<Task> dirsBatch;
@@ -166,13 +174,13 @@ void ExplorerContext::walk() {
               dirsInFlight.fetch_add(1, std::memory_order_acq_rel);
               dirsBatch.emplace_back(std::move(fullPath), task.directoryLevel + 1);
             }
+
+            if (buffer.size() >= MaxBufferRetainedSize) { flushBuffer(); }
           }
 
           closedir(dirHandle);
         }
       }
-
-      flushBuffer();
     }
 
     enqueueBulk(dirsBatch);

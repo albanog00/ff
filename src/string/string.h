@@ -10,36 +10,42 @@
 namespace string {
   struct String {
   private:
-    u8*  data_{nullptr};
-    u32  capacity_{0};
-    u32  size_{0};
+    u8*             data_{nullptr};
+    u32             capacity_{0};
+    u32             size_{0};
+    StringPool<u8>* owner_{nullptr};
 
-    void alloc(u32 size) {
-      data_    = u8StringPool.acquire(size, capacity_);
+    void            alloc(u32 size) {
+      owner_   = &getStringPool();
+      data_    = owner_->acquire(size, capacity_);
       size_    = 0;
       data_[0] = 0;
     }
 
     void release() {
-      if (data_) { u8StringPool.release(data_, capacity_); }
+      if (data_) { owner_->release(data_, capacity_); }
       data_     = nullptr;
       size_     = 0;
       capacity_ = 0;
+      owner_    = nullptr;
     }
 
     void realloc(u32 minSize) {
-      u32 newCapacity = 0;
-      u32 size        = size_;
-      u8* newData     = u8StringPool.acquire(minSize, newCapacity);
+      StringPool<u8>* oldOwner    = owner_;
+      StringPool<u8>* newOwner    = &getStringPool();
+      u32             newCapacity = 0;
+      u32             size        = size_;
+      u8*             newData     = newOwner->acquire(minSize, newCapacity);
 
       if (size_ > 0) { memcpy(newData, data_, size); }
       newData[size] = 0;
 
-      release();
+      if (data_) { oldOwner->release(data_, capacity_); }
 
       data_     = newData;
       capacity_ = newCapacity;
       size_     = size;
+      owner_    = newOwner;
     }
 
     void copy(const String& o) {
@@ -72,7 +78,7 @@ namespace string {
     // movable
     String(String&& o) noexcept :
         data_(std::exchange(o.data_, nullptr)), capacity_(std::exchange(o.capacity_, 0)),
-        size_(std::exchange(o.size_, 0)) {}
+        size_(std::exchange(o.size_, 0)), owner_(std::exchange(o.owner_, nullptr)) {}
 
     String& operator=(String&& o) noexcept {
       if (this == &o) { return *this; }
@@ -80,17 +86,19 @@ namespace string {
       data_     = std::exchange(o.data_, nullptr);
       size_     = std::exchange(o.size_, 0);
       capacity_ = std::exchange(o.capacity_, 0);
+      owner_    = std::exchange(o.owner_, nullptr);
       return *this;
     }
 
     u32              size() const { return size_; }
+    u32              capacity() const { return capacity_; }
     const u8*        data() const { return data_; }
     const char*      c_str() const { return data_ ? reinterpret_cast<const char*>(data_) : ""; }
     std::string      string() const { return data_ ? std::string{c_str(), size_} : ""; }
     std::string_view view() const { return data_ ? std::string_view{c_str(), size_} : ""; }
 
 #if DEBUG
-    static void dumpPoolStats() { u8StringPool.dumpStats(); }
+    static void dumpPoolStats() { getStringPool().dumpStats(); }
 #endif
 
     static String from(const u8* buf, u32 size) {

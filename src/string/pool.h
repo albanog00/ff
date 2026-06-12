@@ -2,9 +2,13 @@
 
 #include "memory/types.h"
 #include "memory/arena.h"
+#include <array>
+#include <cassert>
+#include <atomic>
 #include <bit>
 #include <spdlog/spdlog.h>
 #include <type_traits>
+#include <vector>
 
 namespace string {
   inline u32 upperPowerOfTwo(u32 x) { return std::bit_ceil(x); }
@@ -22,9 +26,10 @@ namespace string {
       Node* next;
     };
 
-    static inline thread_local std::array<Node*, Buckets> freeLists{};
+    memory::Arena                           internalStorage{MiB(64)};
+    std::array<std::atomic<Node*>, Buckets> freeLists{};
 #if DEBUG
-    static inline thread_local std::array<u32, Buckets> count{0};
+    std::array<u32, Buckets> count{};
 #endif
 
     inline u32 getBucketIdx(u32 capacity) {
@@ -38,11 +43,11 @@ namespace string {
     }
 
   public:
-    StringPool(u32 initialCapacityPerBucket = 16) {
+    StringPool(u32 initialCapacityPerBucket = 4) {
       u32 blockSize = MinBlock;
       u32 totalMemory =
           MaxBlock * initialCapacityPerBucket * 2 - (MinBlock * initialCapacityPerBucket);
-      u8* memory        = reinterpret_cast<u8*>(memory::getArena().alloc(totalMemory, Alignment));
+      u8* memory        = reinterpret_cast<u8*>(internalStorage.alloc(totalMemory, Alignment));
       u32 currentOffset = 0;
 
       for (u32 i = 0; i < Buckets; ++i, blockSize <<= 1) {
@@ -55,7 +60,7 @@ namespace string {
           currentOffset += blockSize;
         }
 
-        freeLists[i] = head;
+        freeLists[i].store(head, std::memory_order_relaxed);
 #if DEBUG
         count[i] = initialCapacityPerBucket;
 #endif
@@ -70,49 +75,37 @@ namespace string {
 
       if (outCapacity <= MaxBlock) {
         // get next free node if available
-        Node* head = freeLists[idx];
-        if (head) {
-          freeLists[idx] = head->next;
-          return reinterpret_cast<T*>(head);
+        Node* head = freeLists[idx].load(std::memory_order_acquire);
+        while (head) {
+          assert(internalStorage.owns(head));
+          assert(reinterpret_cast<uintptr_t>(head) % alignof(Node) == 0);
+          Node* next = head->next;
+          if (freeLists[idx].compare_exchange_weak(
+                  head, next, std::memory_order_acq_rel, std::memory_order_acquire)) {
+            return reinterpret_cast<T*>(head);
+          }
         }
+#if DEBUG
+        count[idx] += 1;
+#endif
       }
       // no free node or allocation > MaxBlock
       // fallback and alloc on arena
-
-#if DEBUG
-      if (idx < Buckets) { count[idx] += 1; }
-#endif
-      return reinterpret_cast<T*>(memory::getArena().alloc(outCapacity, Alignment));
+      return reinterpret_cast<T*>(internalStorage.alloc(outCapacity, Alignment));
     }
 
     void release(T* ptr, u32 capacity) {
-      if (!ptr || !memory::getArena().owns(ptr)) { return; }
+      if (!ptr || !internalStorage.owns(ptr)) { return; }
       if (capacity < MinBlock) { return; }
-      if (capacity > MaxBlock) {
-        // there are no bucket available to handle a block of this size.
-        // we split it in multiple middle-sized blocks
-        i32              count128  = capacity >> 8;
-        static const u32 bucket128 = 1;
-        Node*            head128   = freeLists[bucket128];
-        T*               block     = ptr;
-        while (--count128 >= 0) {
-          Node* node = reinterpret_cast<Node*>(block);
-          node->next = head128;
-          head128    = node;
-          block += 128;
-        }
-        freeLists[bucket128] = head128;
-#if DEBUG
-        count[bucket128] += count128;
-#endif
-        return;
-      }
+      if (capacity > MaxBlock) { return; }
 
-      Node* node     = reinterpret_cast<Node*>(ptr);
-      u32   idx      = getBucketIdx(capacity);
-      Node* head     = freeLists[idx];
-      node->next     = head;
-      freeLists[idx] = node;
+      Node* node = reinterpret_cast<Node*>(ptr);
+      u32   idx  = getBucketIdx(capacity);
+      Node* head = freeLists[idx].load(std::memory_order_acquire);
+      do {
+        node->next = head;
+      } while (!freeLists[idx].compare_exchange_weak(
+          head, node, std::memory_order_acq_rel, std::memory_order_acquire));
     }
 
 #if DEBUG
@@ -124,5 +117,16 @@ namespace string {
 #endif
   };
 
-  static thread_local inline StringPool<u8> u8StringPool;
+  inline StringPool<u8>& getStringPool() {
+    static std::mutex                      registryMutex;
+    static std::vector<UP<StringPool<u8>>> pools;
+
+    thread_local StringPool<u8>*           pool = [&] {
+      std::lock_guard lk(registryMutex);
+      pools.emplace_back(std::make_unique<StringPool<u8>>());
+      return pools.back().get();
+    }();
+
+    return *pool;
+  }
 }
