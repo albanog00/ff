@@ -95,7 +95,7 @@ namespace memory {
 
       block_        = block;
       reservedSize  = reserveSize;
-      committedSize = pageSize;
+      committedSize = commitSize;
       currentOffset = 0;
     }
 
