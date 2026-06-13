@@ -2,6 +2,7 @@ build
 .cache
 samples
 result
+.direnv
 
 perf.data*
 flamegraph.html
