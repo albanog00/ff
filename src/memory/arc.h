@@ -44,11 +44,11 @@ namespace memory {
       requires(!(sizeof...(Args) == 1 && (std::same_as<std::remove_cvref_t<Args>, Arc> && ...)))
     Arc(Args&&... args) {
       block_ =
-          new (getArena().alloc(sizeof(Block), alignof(Block))) Block(std::forward<Args>(args)...);
+          new (getSharedMemory().alloc(sizeof(Block), alignof(Block))) Block(std::forward<Args>(args)...);
     }
 
     Arc(T&& val) {
-      block_ = new (getArena().alloc(sizeof(Block), alignof(Block))) Block(std::move(val));
+      block_ = new (getSharedMemory().alloc(sizeof(Block), alignof(Block))) Block(std::move(val));
     }
 
     // copy

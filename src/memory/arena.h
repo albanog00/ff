@@ -138,7 +138,7 @@ namespace memory {
     }
   };
 
-  inline Arena& getArena() {
+  inline Arena& getSharedMemory() {
     static UP<Arena> arena = std::make_unique<Arena>(GiB(1));
     return *arena;
   }

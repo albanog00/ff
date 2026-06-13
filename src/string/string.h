@@ -27,25 +27,21 @@ namespace string {
       data_     = nullptr;
       size_     = 0;
       capacity_ = 0;
-      owner_    = nullptr;
     }
 
     void realloc(u32 minSize) {
-      StringPool<u8>* oldOwner    = owner_;
-      StringPool<u8>* newOwner    = &getStringPool();
-      u32             newCapacity = 0;
-      u32             size        = size_;
-      u8*             newData     = newOwner->acquire(minSize, newCapacity);
+      u32 newCapacity = 0;
+      u32 size        = size_;
+      u8* newData     = owner_->acquire(minSize, newCapacity);
 
       if (size_ > 0) { memcpy(newData, data_, size); }
       newData[size] = 0;
 
-      if (data_) { oldOwner->release(data_, capacity_); }
+      if (data_) { owner_->release(data_, capacity_); }
 
       data_     = newData;
       capacity_ = newCapacity;
       size_     = size;
-      owner_    = newOwner;
     }
 
     void copy(const String& o) {
