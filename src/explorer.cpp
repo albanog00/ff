@@ -1,5 +1,8 @@
 #include "explorer.h"
 #include "app.h"
+#include "utils/defer.h"
+#include "utils/fs.h"
+#include "ignore.h"
 
 #include "memory/types.h"
 #include "string/string.h"
@@ -32,16 +35,6 @@ ExplorerContext::ExplorerContext(std::span<string::String> startPaths) {
   }
 }
 
-static inline bool isDirectory(struct dirent* entry, i32 dirFd) {
-  if (entry->d_type == DT_DIR) {
-    return true;
-  } else if (entry->d_type == DT_UNKNOWN) {
-    struct stat st;
-    return (fstatat(dirFd, entry->d_name, &st, AT_SYMLINK_NOFOLLOW) == 0) && S_ISDIR(st.st_mode);
-  }
-  return false;
-};
-
 string::String buildPath(string::String& rootPath, struct dirent* entry, bool isDir) {
   static thread_local string::String pathBuffer{KiB(4)};
   pathBuffer = rootPath;
@@ -50,6 +43,11 @@ string::String buildPath(string::String& rootPath, struct dirent* entry, bool is
   if (isDir) { pathBuffer += "/"; }
   return pathBuffer;
 };
+
+bool ignorePath(FileType fileType, bool isDir) {
+  return !((fileType == FileType::None) || ((fileType & FileType::Directory) > 0 && isDir) ||
+      ((fileType & FileType::File) > 0 && !isDir));
+}
 
 void ExplorerContext::walk() {
   static pcre2_code* pattern = g_app->pattern;
@@ -62,15 +60,15 @@ void ExplorerContext::walk() {
   pcre2_match_data* match_data = pcre2_match_data_create_from_pattern(pattern, 0);
   defer(pcre2_match_data_free(match_data));
 
-  static const bool           isPipe                = g_app->pipe;
-  static const bool           enqueueHidden         = g_app->hidden;
-  static const u32            maxDepth              = g_app->maxDepth;
-  static const FileType       fileType              = g_app->type;
-  static const u32            OutBufferCapacity     = KiB(32) - 1;
-  static const u32            MaxBufferRetainedSize = KiB(24);
+  static const bool     isPipe                = g_app->pipe;
+  static const bool     enqueueHidden         = g_app->hidden;
+  static const u32      maxDepth              = g_app->maxDepth;
+  static const FileType fileType              = g_app->type;
+  static const u32      OutBufferCapacity     = KiB(32) - 1;
+  static const u32      MaxBufferRetainedSize = KiB(24);
 
-  thread_local string::String buffer{OutBufferCapacity};
-  auto                        flushBuffer = [&] {
+  string::String        buffer{OutBufferCapacity};
+  auto                  flushBuffer = [&] {
     u64 written = 0;
     u64 size    = buffer.size();
     while (written < size) {
@@ -143,7 +141,7 @@ void ExplorerContext::walk() {
   std::vector<Task> dirsBatch;
   dirsBatch.reserve(1024);
 
-  std::array<Task, 64> tasks;
+  std::array<Task, 16> tasks;
   bool                 loop = true;
 
   while (loop) {
@@ -165,57 +163,7 @@ void ExplorerContext::walk() {
         defer(closedir(dirHandle));
         i32 dirFd = dirfd(dirHandle);
 
-        // try open .gitignore in current dir
-        i32 gitignoreFd;
-        if (gitignoreFd = openat(dirFd, ".gitignore", O_RDONLY); gitignoreFd != -1) {
-          defer(close(gitignoreFd));
-          // gitignore file found
-          memory::TempArena scratch = memory::getLocalScratchArena();
-
-#if DEBUG
-          string::String gitignoreFullPath = dirPath + ".gitignore";
-          spdlog::debug("opened {} at fd {}", gitignoreFullPath.c_str(), gitignoreFd);
-#endif
-
-          // get byte file size by seeking to end
-          i64 size = lseek(gitignoreFd, 0, SEEK_END);
-          lseek(gitignoreFd, 0, SEEK_SET); // reset to offset 0
-
-          // 64 bytes aligned - reused memory, contains old values
-          u8* fileBuffer   = static_cast<u8*>(scratch.arena.alloc(size + 1, 64));
-          fileBuffer[size] = 0;
-
-          // read file until eof
-          i32 bufOffset = 0;
-          while (bufOffset < size) {
-            i32 got = read(gitignoreFd, fileBuffer + bufOffset, size - bufOffset);
-            if (got == 0) { break; }
-            bufOffset += got;
-          }
-
-          // read file and evaluate glob patterns from .gitignore files
-          const u8* newLine     = nullptr;
-          u64       startOffset = 0;
-          bool      scanning    = true;
-
-          while (scanning) {
-            u8* start = fileBuffer + startOffset;
-            newLine   = static_cast<u8*>(memchr(start, '\n', size - startOffset));
-
-            if (newLine == nullptr) {
-              // treat last char as newline
-              newLine  = fileBuffer + size;
-              scanning = false;
-            }
-
-            // start of next line
-            startOffset = newLine - fileBuffer + 1;
-
-            // TODO: parse lines
-          }
-
-          // work done
-        }
+        readGitignore(dirPath, dirFd);
 
         // scan dir entries
         while ((entry = readdir(dirHandle)) != NULL) {
@@ -231,11 +179,9 @@ void ExplorerContext::walk() {
 
           // TODO: apply .gitignore rules
 
-          if ((fileType == FileType::None) || ((fileType & FileType::Directory) > 0 && isDir) ||
-              ((fileType & FileType::File) > 0 && !isDir)) {
-            findAndHighlightPattern(fullPath);
-          }
+          if (ignorePath(fileType, isDir)) { continue; }
 
+          findAndHighlightPattern(fullPath);
           if (buffer.size() >= MaxBufferRetainedSize) { flushBuffer(); }
 
           if (isDir) {
