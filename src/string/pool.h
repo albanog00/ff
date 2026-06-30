@@ -95,9 +95,15 @@ namespace string {
     }
 
     void release(T* ptr, u32 capacity) {
-      if (!ptr || !internalStorage.owns(ptr)) { return; }
-      if (capacity < MinBlock) { return; }
-      if (capacity > MaxBlock) { return; }
+      if (!ptr || !internalStorage.owns(ptr)) {
+        return;
+      }
+      if (capacity < MinBlock) {
+        return;
+      }
+      if (capacity > MaxBlock) {
+        return;
+      }
 
       Node* node = reinterpret_cast<Node*>(ptr);
       u32   idx  = getBucketIdx(capacity);

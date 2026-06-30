@@ -23,7 +23,9 @@ namespace string {
     }
 
     void release() {
-      if (data_) { owner_->release(data_, capacity_); }
+      if (data_) {
+        owner_->release(data_, capacity_);
+      }
       data_     = nullptr;
       size_     = 0;
       capacity_ = 0;
@@ -34,10 +36,14 @@ namespace string {
       u32 size        = size_;
       u8* newData     = owner_->acquire(minSize, newCapacity);
 
-      if (size_ > 0) { memcpy(newData, data_, size); }
+      if (size_ > 0) {
+        memcpy(newData, data_, size);
+      }
       newData[size] = 0;
 
-      if (data_) { owner_->release(data_, capacity_); }
+      if (data_) {
+        owner_->release(data_, capacity_);
+      }
 
       data_     = newData;
       capacity_ = newCapacity;
@@ -51,7 +57,9 @@ namespace string {
       }
 
       size_ = o.size_;
-      if (o.data_) { memcpy(data_, o.data_, o.size_); }
+      if (o.data_) {
+        memcpy(data_, o.data_, o.size_);
+      }
       data_[size_] = 0;
     }
 
@@ -66,7 +74,9 @@ namespace string {
     String(const String& o) noexcept { copy(o); }
 
     String& operator=(const String& o) noexcept {
-      if (this == &o) { return *this; }
+      if (this == &o) {
+        return *this;
+      }
       copy(o);
       return *this;
     }
@@ -77,7 +87,9 @@ namespace string {
         size_(std::exchange(o.size_, 0)), owner_(std::exchange(o.owner_, nullptr)) {}
 
     String& operator=(String&& o) noexcept {
-      if (this == &o) { return *this; }
+      if (this == &o) {
+        return *this;
+      }
       release();
       data_     = std::exchange(o.data_, nullptr);
       size_     = std::exchange(o.size_, 0);
@@ -98,7 +110,9 @@ namespace string {
 #endif
 
     static String from(const u8* buf, u32 size) {
-      if (!buf || size == 0) { return String{}; }
+      if (!buf || size == 0) {
+        return String{};
+      }
       String str(size);
       memcpy(str.data_, buf, size);
       str.data_[size] = 0;
@@ -109,7 +123,8 @@ namespace string {
     static String from(const String& str) { return String::from(str.data_, str.size_); }
 
     static String from(const char* cstr) {
-      if (!cstr) return String::from(nullptr, 0);
+      if (!cstr)
+        return String::from(nullptr, 0);
       return from(reinterpret_cast<const u8*>(cstr), strlen(cstr));
     }
 
@@ -118,7 +133,8 @@ namespace string {
     }
 
     inline bool equals(const u8* buf, u32 size) const {
-      if (size_ == 0) return size_ == size;
+      if (size_ == 0)
+        return size_ == size;
       return size_ == size && memcmp(data_, buf, size) == 0;
     }
 
@@ -126,7 +142,8 @@ namespace string {
     inline bool operator!=(const String& o) const { return !(*this == o); }
 
     inline bool operator==(const char* o) const {
-      if (!o) return size_ == 0;
+      if (!o)
+        return size_ == 0;
       return equals(reinterpret_cast<const u8*>(o), strlen(o));
     }
     inline bool operator!=(const char* o) const { return !(*this == o); }
@@ -137,7 +154,9 @@ namespace string {
     inline bool operator!=(const std::string& o) const { return !(*this == o); }
 
     inline bool startsWith(const char* prefix) const {
-      if (!prefix) { return size_ == 0; }
+      if (!prefix) {
+        return size_ == 0;
+      }
       u32 len = strlen(prefix);
       return size_ >= len && memcmp(data_, prefix, len) == 0;
     }
@@ -146,11 +165,15 @@ namespace string {
 
     inline void clear() {
       size_ = 0;
-      if (data_) { data_[0] = 0; }
+      if (data_) {
+        data_[0] = 0;
+      }
     }
 
     void append(const u8* o, u32 size) {
-      if (size_ + size >= capacity_) { realloc(size_ + size); }
+      if (size_ + size >= capacity_) {
+        realloc(size_ + size);
+      }
       memmove(data_ + size_, o, size);
       size_ += size;
       data_[size_] = 0;
@@ -177,12 +200,16 @@ namespace string {
     inline bool empty() const { return size_ == 0; }
 
     inline u8   back() const {
-      if (data_ && size_ > 0) { return data_[size_ - 1]; }
+      if (data_ && size_ > 0) {
+        return data_[size_ - 1];
+      }
       return 0;
     }
 
     inline u8 front() const {
-      if (data_ && size_ > 0) { return data_[0]; }
+      if (data_ && size_ > 0) {
+        return data_[0];
+      }
       return 0;
     }
   };

@@ -83,7 +83,9 @@ void parseOption(std::string_view opt) {
     u64 pos  = opt.find_first_of("=") + 1;
     u64 last = pos;
     while (true) {
-      if (pos = opt.find(',', pos); pos == std::string_view::npos) { break; }
+      if (pos = opt.find(',', pos); pos == std::string_view::npos) {
+        break;
+      }
       g_app->type |= FileType::parse(opt.substr(last, pos - last));
       pos += 1;
       last = pos;
@@ -113,7 +115,9 @@ bool init(std::span<char*> args) {
   spdlog::set_level(spdlog::level::info);
 #endif
 
-  if (args.size() <= 1) { printUsage(args[0]); }
+  if (args.size() <= 1) {
+    printUsage(args[0]);
+  }
 
   // is output piped?
   g_app->pipe = !isatty(STDOUT_FILENO);
@@ -163,7 +167,9 @@ void run() {
 
 i32 main(i32 argc, char** argv) {
   std::span<char*> args{argv, static_cast<size_t>(argc)};
-  if (!init(args)) { return 1; }
+  if (!init(args)) {
+    return 1;
+  }
   run();
   return 0;
 }

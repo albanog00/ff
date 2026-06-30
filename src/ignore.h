@@ -10,7 +10,9 @@
 inline void readGitignore([[maybe_unused]] string::String& dirPath, i32 dirFd) {
   // try open .gitignore in current dir
   i32 gitignoreFd = openat(dirFd, ".gitignore", O_RDONLY);
-  if (gitignoreFd != -1) { return; }
+  if (gitignoreFd != -1) {
+    return;
+  }
 
   // gitignore file found
   defer(close(gitignoreFd));
@@ -33,7 +35,9 @@ inline void readGitignore([[maybe_unused]] string::String& dirPath, i32 dirFd) {
   i32 bufOffset = 0;
   while (bufOffset < size) {
     i32 got = read(gitignoreFd, fileBuffer + bufOffset, size - bufOffset);
-    if (got == 0) { break; }
+    if (got == 0) {
+      break;
+    }
     bufOffset += got;
   }
 

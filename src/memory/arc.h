@@ -43,8 +43,8 @@ namespace memory {
     template <typename... Args>
       requires(!(sizeof...(Args) == 1 && (std::same_as<std::remove_cvref_t<Args>, Arc> && ...)))
     Arc(Args&&... args) {
-      block_ =
-          new (getSharedMemory().alloc(sizeof(Block), alignof(Block))) Block(std::forward<Args>(args)...);
+      block_ = new (getSharedMemory().alloc(sizeof(Block), alignof(Block)))
+          Block(std::forward<Args>(args)...);
     }
 
     Arc(T&& val) {
@@ -54,13 +54,19 @@ namespace memory {
     // copy
     Arc(const Arc& o) {
       block_ = o.block_;
-      if (block_) { block_->refCount_.fetch_add(1, std::memory_order_relaxed); }
+      if (block_) {
+        block_->refCount_.fetch_add(1, std::memory_order_relaxed);
+      }
     }
 
     Arc& operator=(const Arc& o) {
-      if (this == &o) { return *this; }
+      if (this == &o) {
+        return *this;
+      }
       block_ = o.block_;
-      if (block_) { block_->refCount_.fetch_add(1, std::memory_order_relaxed); }
+      if (block_) {
+        block_->refCount_.fetch_add(1, std::memory_order_relaxed);
+      }
       return *this;
     }
 
@@ -68,7 +74,9 @@ namespace memory {
     Arc(Arc&& o) noexcept : block_(std::exchange(o.block_, nullptr)) {}
 
     Arc& operator=(Arc&& o) noexcept {
-      if (this == &o) { return *this; }
+      if (this == &o) {
+        return *this;
+      }
       release();
       block_ = std::exchange(o.block_, nullptr);
       return *this;

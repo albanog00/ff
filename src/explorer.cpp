@@ -27,7 +27,9 @@ ExplorerContext::ExplorerContext(std::span<string::String> startPaths) {
     }
   }
 
-  if (failed == startPaths.size()) { throw std::logic_error("could not start search"); }
+  if (failed == startPaths.size()) {
+    throw std::logic_error("could not start search");
+  }
 
   threads.reserve(nExplorers);
   for (u32 i = 0; i < nExplorers; ++i) {
@@ -38,9 +40,13 @@ ExplorerContext::ExplorerContext(std::span<string::String> startPaths) {
 string::String buildPath(string::String& rootPath, struct dirent* entry, bool isDir) {
   static thread_local string::String pathBuffer{KiB(4)};
   pathBuffer = rootPath;
-  if (rootPath.back() != '/') { pathBuffer += "/"; }
+  if (rootPath.back() != '/') {
+    pathBuffer += "/";
+  }
   pathBuffer.append(entry->d_name);
-  if (isDir) { pathBuffer += "/"; }
+  if (isDir) {
+    pathBuffer += "/";
+  }
   return pathBuffer;
 };
 
@@ -73,7 +79,9 @@ void ExplorerContext::walk() {
     u64 size    = buffer.size();
     while (written < size) {
       ssize_t n = write(STDOUT_FILENO, buffer.c_str() + written, size - written);
-      if (n <= 0) { break; }
+      if (n <= 0) {
+        break;
+      }
       written += static_cast<u64>(n);
     }
     buffer.clear();
@@ -121,7 +129,9 @@ void ExplorerContext::walk() {
 
           // set color for current group match
           buffer += *it;
-          if (++it == colors.cend()) { it = colors.cbegin(); }
+          if (++it == colors.cend()) {
+            it = colors.cbegin();
+          }
 
           buffer.append(start, len);
           buffer += "\033[30m"; // black
@@ -172,20 +182,28 @@ void ExplorerContext::walk() {
           }
 
           // skip hidden when hidden flag is not enabled
-          if (entry->d_name[0] == '.' && !enqueueHidden) { continue; }
+          if (entry->d_name[0] == '.' && !enqueueHidden) {
+            continue;
+          }
 
           bool           isDir    = isDirectory(entry, dirFd);
           string::String fullPath = buildPath(dirPath, entry, isDir);
 
           // TODO: apply .gitignore rules
 
-          if (ignorePath(fileType, isDir)) { continue; }
+          if (ignorePath(fileType, isDir)) {
+            continue;
+          }
 
           findAndHighlightPattern(fullPath);
-          if (buffer.size() >= MaxBufferRetainedSize) { flushBuffer(); }
+          if (buffer.size() >= MaxBufferRetainedSize) {
+            flushBuffer();
+          }
 
           if (isDir) {
-            if (maxDepth > 0 && task.directoryLevel + 1 == maxDepth) { continue; }
+            if (maxDepth > 0 && task.directoryLevel + 1 == maxDepth) {
+              continue;
+            }
             dirsInFlight.fetch_add(1, std::memory_order_acq_rel);
             dirsBatch.emplace_back(std::move(fullPath), task.directoryLevel + 1);
           }

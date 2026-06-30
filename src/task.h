@@ -14,7 +14,9 @@ struct Task {
       fullPath(std::move(o.fullPath)), directoryLevel(std::exchange(o.directoryLevel, 0)) {}
 
   Task& operator=(Task&& o) noexcept {
-    if (this == &o) { return *this; }
+    if (this == &o) {
+      return *this;
+    }
     fullPath       = std::move(o.fullPath);
     directoryLevel = std::exchange(o.directoryLevel, 0);
     return *this;
