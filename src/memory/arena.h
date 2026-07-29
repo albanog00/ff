@@ -44,9 +44,8 @@ namespace memory {
       std::scoped_lock lk(commitMutex);
 
       u64              committed = committedSize.load(std::memory_order_acquire);
-      if (committed >= newOffset) {
+      if (committed >= newOffset)
         return true;
-      }
 
       u64 commitTarget = alignUp(newOffset, getCommitSize());
       commitTarget     = std::min(commitTarget, reservedSize);
@@ -105,32 +104,30 @@ namespace memory {
 
     void* alloc(u64 size, u64 alignment = alignof(std::max_align_t)) {
       assert((alignment & (alignment - 1)) == 0 && "alignment not power of 2");
-      if (size == 0) {
+      if (size == 0)
         return nullptr;
-      }
 
       u64 current = currentOffset.load(std::memory_order_relaxed);
       while (true) {
         u64 alignedOffset = alignUp(current, alignment);
         u64 newOffset     = alignedOffset + size;
 
-        if (newOffset > reservedSize) {
+        if (newOffset > reservedSize)
           break;
-        }
+
         if (newOffset > committedSize.load(std::memory_order_acquire)) {
-          if (!commit(newOffset)) {
+          if (!commit(newOffset))
             break;
-          }
         }
 
         if (currentOffset.compare_exchange_weak(
-                current, newOffset, std::memory_order_acq_rel, std::memory_order_relaxed)) {
+                current, newOffset, std::memory_order_acq_rel, std::memory_order_relaxed))
           return static_cast<void*>(block_ + alignedOffset);
-        }
       }
 
       spdlog::error("arena allocation failed: size={} alignment={} currentOffset={}", size,
           alignment, currentOffset.load(std::memory_order_relaxed));
+
       return nullptr;
     }
 

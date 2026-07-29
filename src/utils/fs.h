@@ -1,7 +1,6 @@
 #pragma once
 
 #include "memory/types.h"
-
 #include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>

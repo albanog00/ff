@@ -40,13 +40,11 @@ ExplorerContext::ExplorerContext(std::span<string::String> startPaths) {
 string::String buildPath(string::String& rootPath, struct dirent* entry, bool isDir) {
   static thread_local string::String pathBuffer{KiB(4)};
   pathBuffer = rootPath;
-  if (rootPath.back() != '/') {
+  if (rootPath.back() != '/')
     pathBuffer += "/";
-  }
   pathBuffer.append(entry->d_name);
-  if (isDir) {
+  if (isDir)
     pathBuffer += "/";
-  }
   return pathBuffer;
 };
 
@@ -129,9 +127,8 @@ void ExplorerContext::walk() {
 
           // set color for current group match
           buffer += *it;
-          if (++it == colors.cend()) {
+          if (++it == colors.cend())
             it = colors.cbegin();
-          }
 
           buffer.append(start, len);
           buffer += "\033[30m"; // black
@@ -171,41 +168,34 @@ void ExplorerContext::walk() {
 
       if ((dirHandle = opendir(dirPath.c_str())) != NULL) [[likely]] {
         defer(closedir(dirHandle));
-        i32 dirFd = dirfd(dirHandle);
-
-        readGitignore(dirPath, dirFd);
+        i32  dirFd     = dirfd(dirHandle);
+        auto ignoreCtx = readGitignore(dirPath, dirFd, task.ignoreContext);
 
         // scan dir entries
         while ((entry = readdir(dirHandle)) != NULL) {
-          if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) [[unlikely]] {
+          if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) [[unlikely]]
             continue;
-          }
 
           // skip hidden when hidden flag is not enabled
-          if (entry->d_name[0] == '.' && !enqueueHidden) {
+          if (entry->d_name[0] == '.' && !enqueueHidden)
             continue;
-          }
 
           bool           isDir    = isDirectory(entry, dirFd);
           string::String fullPath = buildPath(dirPath, entry, isDir);
 
-          // TODO: apply .gitignore rules
-
-          if (ignorePath(fileType, isDir)) {
+          if (ignorePath(fileType, isDir) || isIgnored(ignoreCtx, fullPath, isDir))
             continue;
-          }
 
           findAndHighlightPattern(fullPath);
-          if (buffer.size() >= MaxBufferRetainedSize) {
+          if (buffer.size() >= MaxBufferRetainedSize)
             flushBuffer();
-          }
 
           if (isDir) {
-            if (maxDepth > 0 && task.directoryLevel + 1 == maxDepth) {
+            if (maxDepth > 0 && task.directoryLevel + 1 == maxDepth)
               continue;
-            }
+
             dirsInFlight.fetch_add(1, std::memory_order_acq_rel);
-            dirsBatch.emplace_back(std::move(fullPath), task.directoryLevel + 1);
+            dirsBatch.emplace_back(std::move(fullPath), task.directoryLevel + 1, ignoreCtx);
           }
         }
       }
@@ -214,8 +204,7 @@ void ExplorerContext::walk() {
       dirsBatch.clear();
     }
 
-    if (dirsInFlight.fetch_sub(count, std::memory_order_acq_rel) == count) [[unlikely]] {
+    if (dirsInFlight.fetch_sub(count, std::memory_order_acq_rel) == count) [[unlikely]]
       poison();
-    }
   }
 };

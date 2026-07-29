@@ -81,9 +81,8 @@ namespace string {
           assert(reinterpret_cast<uintptr_t>(head) % alignof(Node) == 0);
           Node* next = head->next;
           if (freeLists[idx].compare_exchange_weak(
-                  head, next, std::memory_order_acq_rel, std::memory_order_acquire)) {
+                  head, next, std::memory_order_acq_rel, std::memory_order_acquire))
             return reinterpret_cast<T*>(head);
-          }
         }
 #if DEBUG
         count[idx] += 1;
@@ -95,15 +94,12 @@ namespace string {
     }
 
     void release(T* ptr, u32 capacity) {
-      if (!ptr || !internalStorage.owns(ptr)) {
+      if (!ptr || !internalStorage.owns(ptr))
         return;
-      }
-      if (capacity < MinBlock) {
+      if (capacity < MinBlock)
         return;
-      }
-      if (capacity > MaxBlock) {
+      if (capacity > MaxBlock)
         return;
-      }
 
       Node* node = reinterpret_cast<Node*>(ptr);
       u32   idx  = getBucketIdx(capacity);
