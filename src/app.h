@@ -6,11 +6,6 @@
 #define PCRE2_CODE_UNIT_WIDTH 8
 #include <pcre2.h>
 
-enum Search : u8 {
-  Linear = 0,
-  Regex  = 1,
-};
-
 struct FileType {
   enum FileTypeValue : u8 {
     None      = 1 << 0,
@@ -62,7 +57,8 @@ private:
 
 struct App {
   ~App() {
-    if (pattern) { pcre2_code_free(pattern); }
+    if (pattern)
+      pcre2_code_free(pattern);
   }
 
   u32                         maxDepth{0};

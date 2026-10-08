@@ -1,6 +1,7 @@
 #pragma once
 
 #include "memory/types.h"
+#include "memory/arena.h"
 #include "queue/blockingconcurrentqueue.h"
 #include "queue/concurrentqueue.h"
 #include "task.h"

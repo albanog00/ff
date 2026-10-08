@@ -29,7 +29,9 @@ public:
   inline void poison() { enqueue(Task{POISON, 0}); }
 
   inline void join() {
-    for (auto& t : threads) { t.join(); }
+    for (auto& t : threads) {
+      t.join();
+    }
   }
 
 private:

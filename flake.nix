@@ -33,6 +33,7 @@
               valgrind
 
               perf
+              hyperfine
 
               spdlog # Logging
               pcre2.dev # Regex

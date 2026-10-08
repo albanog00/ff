@@ -31,8 +31,8 @@ namespace memory {
     Block* block_{nullptr};
 
     void   release() {
-      if (block_ && block_->refCount_.fetch_sub(1, std::memory_order_relaxed) == 1) {
-        // release pointer
+      if (block_ && block_->refCount_.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+        block_->val_.~T();
       }
       block_ = nullptr;
     }
@@ -43,8 +43,8 @@ namespace memory {
     template <typename... Args>
       requires(!(sizeof...(Args) == 1 && (std::same_as<std::remove_cvref_t<Args>, Arc> && ...)))
     Arc(Args&&... args) {
-      block_ =
-          new (getSharedMemory().alloc(sizeof(Block), alignof(Block))) Block(std::forward<Args>(args)...);
+      block_ = new (getSharedMemory().alloc(sizeof(Block), alignof(Block)))
+          Block(std::forward<Args>(args)...);
     }
 
     Arc(T&& val) {
@@ -54,13 +54,17 @@ namespace memory {
     // copy
     Arc(const Arc& o) {
       block_ = o.block_;
-      if (block_) { block_->refCount_.fetch_add(1, std::memory_order_relaxed); }
+      if (block_)
+        block_->refCount_.fetch_add(1, std::memory_order_relaxed);
     }
 
     Arc& operator=(const Arc& o) {
-      if (this == &o) { return *this; }
+      if (this == &o)
+        return *this;
+      this->release();
       block_ = o.block_;
-      if (block_) { block_->refCount_.fetch_add(1, std::memory_order_relaxed); }
+      if (block_)
+        block_->refCount_.fetch_add(1, std::memory_order_relaxed);
       return *this;
     }
 
@@ -68,20 +72,23 @@ namespace memory {
     Arc(Arc&& o) noexcept : block_(std::exchange(o.block_, nullptr)) {}
 
     Arc& operator=(Arc&& o) noexcept {
-      if (this == &o) { return *this; }
-      release();
+      if (this == &o)
+        return *this;
+      this->release();
       block_ = std::exchange(o.block_, nullptr);
       return *this;
     }
 
-    ~Arc() { release(); }
+    ~Arc() { this->release(); }
 
     u32 count() const { return block_ ? block_->refCount_.load(std::memory_order_relaxed) : 0; }
 
+    T*  get() const { return block_ ? &block_->val_ : nullptr; }
+
     T*  operator->() { return block_ ? &block_->val_ : nullptr; }
     const T* operator->() const { return block_ ? &block_->val_ : nullptr; }
-    T&       operator*() { return block_ ? block_->val_ : nullptr; }
-    const T& operator*() const { return block_ ? block_->val_ : nullptr; }
+    T&       operator*() { assert(block_); return block_->val_; }
+    const T& operator*() const { assert(block_); return block_->val_; }
 
     explicit operator bool() const noexcept { return block_ != nullptr; }
     bool     operator==(const Arc& o) const noexcept { return block_ == o.block_; }
